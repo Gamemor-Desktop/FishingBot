@@ -6,6 +6,23 @@ escala do Windows, calibra sozinho e mostra uma interface simples com
 Iniciar/Parar. Baseado na mesma logica de reconhecimento visual do projeto
 `fivem_fishing_bot` (script), mas sem coordenadas fixas.
 
+Repositorio: https://github.com/Gamemor-Desktop/FishingBot (privado)
+
+## Como conseguir o projeto
+
+O `FishingBot.exe` **nao** fica versionado no git (esta no `.gitignore`, ja
+que e um binario gerado e pesado). Pra conseguir o codigo:
+
+```bat
+git clone https://github.com/Gamemor-Desktop/FishingBot.git
+```
+
+Depois, ou compile o `.exe` voce mesmo (secao "Como compilar" abaixo) ou
+rode direto do codigo-fonte com Python. Nao ha releases publicadas com o
+`.exe` pronto no momento -- se precisar distribuir o executavel pra alguem
+que nao vai compilar, gere localmente com `build.bat` e envie o arquivo por
+fora do git.
+
 ## Como rodar (usuario final, ja com o .exe pronto)
 
 1. Abra o FiveM (janela ou borderless windowed -- fullscreen exclusivo pode
