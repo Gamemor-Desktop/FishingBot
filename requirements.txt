@@ -1,0 +1,7 @@
+mss>=9.0.1
+opencv-python>=4.10.0
+numpy>=2.1.0
+pydirectinput>=1.0.4
+keyboard>=0.13.5
+pywin32>=306
+pyinstaller>=6.10.0

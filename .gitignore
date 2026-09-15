@@ -1,0 +1,27 @@
+# Ambiente virtual Python
+venv/
+.venv/
+
+# Build/dist do PyInstaller
+build/
+dist/
+*.spec.bak
+
+# Executavel compilado (gerado via build.bat, nao precisa ir pro repo)
+*.exe
+
+# Bytecode Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Config/log locais do usuario (ficam em %LOCALAPPDATA%\FishingBot, nao no projeto -- mas por seguranca)
+config.json
+*.log
+
+# Screenshots/debug
+debug/
+
+# IDE
+.vscode/
+.idea/
