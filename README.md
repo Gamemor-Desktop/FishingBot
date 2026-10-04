@@ -196,6 +196,12 @@ pequena).
   concluida depois de `timings.pull_min_seconds` (8 s): em log real a maioria
   das "capturas" terminava 0-5 s depois do ESPACO (puxadas de verdade duram
   30-200 s), com o peixe ainda na linha.
+- **Aviso de "pesca nao comecou"**: depois de apertar a tecla da vara, o bot
+  procura o aviso "X Parar de pescar" (linha na agua). Se ele nao aparecer em
+  `timings.cast_confirm_seconds` (12 s), a interface avisa na hora -- vara nao
+  equipada, menu/inventario aberto, longe do local de pesca -- em vez de
+  esperar 90 s em silencio por uma mordida que nao vem. So informa: nao
+  cancela o lance.
 - **Fisgada por forma e brilho** (`vision.read_hook`): a bolinha vermelha e um
   disco compacto e *brilhante*; a roupa do personagem tem o mesmo matiz mas e
   bem mais escura e irregular. Antes, so a proporcao de pixels vermelhos

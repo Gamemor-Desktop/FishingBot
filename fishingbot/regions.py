@@ -129,6 +129,21 @@ DEFAULT_COLORS = {
             ([0, 30, 70], [15, 200, 255]),
         ],
     },
+    # Aviso "X Parar de pescar": aparece enquanto a linha esta na agua, ou seja,
+    # e o sinal de que a pesca COMECOU depois do lance. Texto vermelho vivo +
+    # o "X" branco da tecla, a esquerda. Medido em 18 capturas rotuladas
+    # (4 com o aviso, em 4 fundos diferentes): vermelho 0.030-0.039 e branco do
+    # X 0.0063 em todas; o painel "Puxando forte" tem vermelho (0.045) mas sem
+    # o X, e a cerca branca tem branco (0.61) mas sem vermelho.
+    "stop_prompt": {
+        "red_ranges": [([0, 140, 170], [8, 255, 255]), ([172, 140, 170], [179, 255, 255])],
+        "red_x_from": 0.15,      # faixa horizontal do texto vermelho
+        "red_x_to": 0.75,
+        "x_key_to": 0.22,        # faixa onde fica a tecla 'X'
+        "min_red": 0.02,
+        "min_white": 0.003,
+        "max_white": 0.05,
+    },
     # Texto branco do painel ("Calmo", "Puxando forte", "Quase fora d'agua"):
     # independe do fundo, ao contrario da cor da caixa, que e TRANSLUCIDA e
     # muda com o cenario atras. Medido em 103 capturas reais (03/10/2026): o

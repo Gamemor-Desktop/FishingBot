@@ -119,6 +119,24 @@ def panel_text_features(frame_bgr: np.ndarray, cfg: dict) -> tuple[float, float]
     return n_white / white.size, near_dark
 
 
+def stop_prompt_visible(frame_bgr: np.ndarray, cfg: dict) -> bool:
+    """True se o aviso "X Parar de pescar" esta na regiao (a linha esta na
+    agua = a pesca comecou). Exige AS DUAS marcas: texto vermelho vivo e o X
+    branco da tecla, a esquerda. Ver regions.DEFAULT_COLORS['stop_prompt']."""
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    h, w = hsv.shape[:2]
+    red = np.zeros((h, w), dtype=np.uint8)
+    for lower, upper in cfg["red_ranges"]:
+        red = cv2.bitwise_or(red, cv2.inRange(hsv, np.array(lower, dtype=np.uint8),
+                                              np.array(upper, dtype=np.uint8)))
+    band = red[:, int(w * cfg["red_x_from"]):int(w * cfg["red_x_to"])]
+    left = hsv[:, :int(w * cfg["x_key_to"])]
+    white = cv2.inRange(left, np.array([0, 0, 225], dtype=np.uint8),
+                        np.array([179, 40, 255], dtype=np.uint8))
+    return (pixel_ratio(band) >= cfg["min_red"]
+            and cfg["min_white"] <= pixel_ratio(white) <= cfg["max_white"])
+
+
 def largest_blob_centroid(mask: np.ndarray, min_area: int = 10) -> tuple[float, float] | None:
     """Retorna (cx, cy) do maior blob na mascara, em coordenadas relativas ao recorte usado."""
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
