@@ -182,14 +182,31 @@ contra um modelo: positivos 1,00/1,00 (recall/precisao), melhor negativo
 
 **Limites conhecidos (nao validados):**
 
-- So existem leituras reais de **0 a 6 m** (fundo raso); 7, 8 e 9 vem so do
-  LINHA e os numeros de **2-3 digitos** foram testados so com imagens
-  sintetizadas (digitos reais colados). Falta uma gravacao em agua funda.
-- Resolucao: validado em **1920x1080 e maiores** (1,33x e 2x: 14/14). Abaixo
-  disso a leitura piora (0,85x: 12/14; 0,667x: 0/14) -- mas **nunca devolve um
-  numero errado**, so "nao li", e o bot nao aperta E.
+- Leituras reais de **0 a 27 m** (gravacoes de 04/10/2026, agua rasa e funda).
+  **3 digitos (100+) so foram testados com imagens sintetizadas** (digitos reais
+  colados): nao ha gravacao real de 100 m ou mais.
+- Resolucao: validado em **1920x1080** (50/50). Em outras escalas (1,1x a 2x,
+  reamostradas) 46-50 de 50 sao lidas e **nenhuma e lida errada**; abaixo de 1080p
+  a leitura piora (0,85x: 12/14; 0,667x: 0/14) -- sempre "nao li", nunca um
+  numero errado, e o bot nao aperta E. **Consequencia:** se o digito exato do alvo
+  nao for legivel, o bot trava no proximo valor legivel (ex.: alvo 8, trava em 9).
 - Nao se sabe se bites acontecem durante o AFUNDANDO; por seguranca a mordida tem
   prioridade sobre a trava.
+
+**Gravacao em agua funda (04/10/2026 01:03).** Validacao FORA DA AMOSTRA: com os
+modelos feitos so da gravacao rasa e do LINHA, o leitor produziu uma **escada
+perfeita 0, 1, 2, ..., 27** (cada inteiro uma vez, na ordem, 189 quadros com
+numero, **0 saltos ou retrocessos**), incluindo 7, 8, 9 e todos os numeros de 2
+digitos; conferido a olho em 10 instantes. O prompt do E foi detectado de 10,8 s a
+21,4 s e sumiu quando o E foi apertado; nenhum falso positivo (tela de outro
+programa, "X Parar de pescar", "-" do arremesso). Margens: a minima foi 0,031 (nos
+digitos '8' e '18') -- perto do limite 0,03 --; acrescentar 41 recortes dessa
+gravacao como fixtures e regerar os modelos subiu a minima para **0,050**.
+
+Observado nessa gravacao: a profundidade sobe **~2,5 m/s** (1 m a cada ~0,4 s);
+existe uma fase **PREPARANDO** (LINHA `0,0 /200 m`) antes do ARREMESSANDO; depois
+do E o HUD vai a ESPERANDO com a profundidade travada (`27 m`, **sem** o
+`(fundo)`) e o prompt "[X] Parar de pescar".
 
 ## Comportamentos do jogo observados
 
