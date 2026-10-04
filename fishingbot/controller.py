@@ -396,6 +396,10 @@ class Controller:
         quando a janela some/muda ou o usuario manda parar; o loop externo
         reinicia do ponto certo."""
         self.shared.clear_abort()
+        # Uma pausa deixada por uma execucao anterior (jogo fora de foco -> PARAR -> INICIAR)
+        # nao pode valer na proxima: o watchdog novo reavalia o foco do zero. Sem isso o
+        # checkpoint() do primeiro lancamento ficava bloqueado e o bot nunca apertava o '4'.
+        self.shared.clear_pause()
         window = self._find_window_blocking()
         if window is None:
             return  # _find_window_blocking ja tratou o estado/espera
@@ -655,6 +659,7 @@ class Controller:
         finally:
             health.stop()
             watchdog.stop()
+            self.shared.clear_pause()   # parado nao esta "pausado": nem a tela nem a proxima execucao herdam isso
             input_sim.set_focus_guard(None)
             input_sim.release_all()
             sct.close()

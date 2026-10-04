@@ -276,3 +276,47 @@ def test_wait_for_bite_pausado_acorda_e_para_se_mandarem_parar():
     threading.Timer(0.2, lambda: shared.update(user_wants_running=False)).start()
     assert fishing_logic.wait_for_bite(_NoScreen(), {"hook_zone": Region(0, 0, 10, 10)},
                                        shared, True, 30.0, 45.0) is False
+
+
+# -- pausa de uma execucao anterior NAO pode travar o proximo INICIAR ----------------------------
+# Relato: "nao esta lancando a linha". No log, os 7 reinicios feitos com uma pausa ainda aberta
+# (jogo fora de foco -> PARAR -> INICIAR) nunca apertaram o 4; os 29 sem pausa pendente apertaram
+# todos. A pausa so era liberada pelo watchdog ao ver o jogo voltar; PARAR/INICIAR deixava
+# pause_reason gravado e o checkpoint() do primeiro lancamento ficava bloqueado.
+
+def test_iniciar_depois_de_uma_pausa_antiga_lanca_a_vara(ctrl, monkeypatch):
+    monkeypatch.setattr(controller_mod._WindowWatchdog, "start", lambda self: None)
+    monkeypatch.setattr(_HealthMonitor, "start", lambda self: None)
+    win = _window()
+    monkeypatch.setattr(ctrl, "_find_window_blocking", lambda: win)
+    monkeypatch.setattr(ctrl, "_calibrate", lambda w: (compute_all_regions(0, 0, win.width, win.height),
+                                                        ctrl.cfg["keybinds"], ctrl.cfg["timings"]))
+    lancou = []
+
+    def fake_start(*a, **k):
+        lancou.append(1)
+        ctrl.shared.update(user_wants_running=False)      # basta ver que lancou; encerra o laco
+    monkeypatch.setattr(fishing_logic, "run_start_sequence", fake_start)
+    monkeypatch.setattr(fishing_logic, "wait_for_bite", lambda *a, **k: False)
+
+    # execucao anterior terminou com o jogo fora de foco (pausa aberta) e o usuario apertou PARAR
+    ctrl.shared.set_pause("FiveM sem foco (em primeiro plano: Alternancia de Tarefas [explorer.exe])")
+    ctrl.shared.update(user_wants_running=True)             # ...e depois INICIAR
+
+    t = threading.Thread(target=ctrl._run_once, daemon=True)
+    t.start()
+    assert _wait_for(lambda: lancou, timeout=2.0), "a pausa velha bloqueou o primeiro lancamento"
+    t.join(timeout=3)
+
+
+def test_parar_nao_deixa_a_pausa_gravada(ctrl, loop_env):
+    ctrl.shared.set_pause("FiveM sem foco")
+    loop_env([O.NO_BITE] * 10)                  # roda o laco ate o disjuntor parar o bot
+    assert ctrl.shared.snapshot()["pause_reason"] == ""
+
+
+def test_gui_nao_mostra_pausado_depois_de_parar(ctrl, loop_env):
+    """pause_reason velho faria a interface mostrar 'PAUSADO' com o bot parado."""
+    ctrl.shared.set_pause("FiveM minimizado")
+    loop_env([O.NO_BITE] * 10)
+    assert not ctrl.shared.snapshot()["pause_reason"]
