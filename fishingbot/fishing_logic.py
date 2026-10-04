@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from enum import Enum
 
 import mss
@@ -39,6 +40,15 @@ class DepthLock(Enum):
     FAILED = "falhou"             # apertei E e o prompt continuou na tela
     STOPPED = "interrompido"      # PARAR / panico / watchdog
 
+
+# Fim da puxada: o painel "sumiu" quando pelo menos PULL_END_NONE_RATIO dos quadros da
+# janela de end_confirm_seconds estao sem painel (e ha PULL_END_MIN_FRAMES quadros na
+# janela). Antes bastava nao haver 3 leituras seguidas iguais: um classificador que
+# erra 1 de cada 3 quadros, com o painel NA TELA, nunca "confirmava" e a puxada
+# acabava (falso "peixe capturado") assim que o tempo minimo passava.
+PULL_END_NONE_RATIO = 0.9
+PULL_END_MIN_FRAMES = 5
+PULL_UNSTABLE_WARN_RATIO = 0.05
 
 DEPTH_POLL_SECONDS = 0.03         # a profundidade sobe ~2 m/s: 30 ms e mais que suficiente
 DEPTH_CONFIRM_READS = 2           # leituras seguidas >= alvo antes de apertar E
@@ -336,9 +346,10 @@ def run_pulling_phase(sct: mss.MSS, regions: dict, keybinds: dict, shared: Share
     debounce_needed = 2
     last_state = None
     stable_count = 0
-    none_since: float | None = None
     panel_seen = False
     start = time.monotonic()
+    window: deque = deque()           # (instante, True se o quadro nao tinha painel)
+    total_frames = none_frames = 0
 
     try:
         while time.monotonic() - start < timeout_seconds:
@@ -349,12 +360,18 @@ def run_pulling_phase(sct: mss.MSS, regions: dict, keybinds: dict, shared: Share
                 # o controlador soltou as teclas ao pausar; ao voltar, o painel
                 # precisa ser relido do zero (nao conta como "sumiu")
                 start += paused
-                none_since = None
+                window.clear()
                 stable_count = 0
                 last_state = None
                 continue
 
             state = classify_pull_state(sct, regions)
+            now = time.monotonic()
+            total_frames += 1
+            none_frames += state is None
+            window.append((now, state is None))
+            while window and now - window[0][0] > end_confirm_seconds:
+                window.popleft()
             shared.update(fish_state_text={"gray": "Calmo", "red": "Puxando forte", None: "-"}[state])
 
             if state == last_state:
@@ -366,18 +383,8 @@ def run_pulling_phase(sct: mss.MSS, regions: dict, keybinds: dict, shared: Share
 
             if state is not None:
                 panel_seen = True
-                # So cancela a contagem de "painel sumiu" com uma leitura
-                # CONFIRMADA (debounced) do painel de volta. Um unico frame
-                # de flicker (ex: animacao de fade-out do painel batendo por
-                # coincidencia com a cor configurada por 1 frame isolado)
-                # nao deve reiniciar o relogio -- isso era o que deixava a
-                # tecla (W/S) presa bem alem da hora depois do peixe ja ter
-                # saido da agua, porque cada flicker reiniciava o
-                # end_confirm_seconds do zero.
-                if confirmed:
-                    none_since = None
             elif not panel_seen:
-                if time.monotonic() - start >= first_appear_timeout_seconds:
+                if now - start >= first_appear_timeout_seconds:
                     log.warning(
                         f"Painel de puxar nunca apareceu em {first_appear_timeout_seconds:.1f}s "
                         f"apos o ESPACO -- a regiao 'pulling_state' ou as cores em DEFAULT_COLORS "
@@ -385,13 +392,13 @@ def run_pulling_phase(sct: mss.MSS, regions: dict, keybinds: dict, shared: Share
                         f"proporcoes de cor e as screenshots da regiao capturada."
                     )
                     return CastOutcome.NO_PANEL
-            else:
-                if none_since is None:
-                    none_since = time.monotonic()
-                elif (time.monotonic() - none_since >= end_confirm_seconds
-                      and time.monotonic() - start >= min_pull_seconds):
-                    log.info(f"Painel de pesca sumiu (ausente por {end_confirm_seconds:.2f}s "
-                             f"seguidos) -> peixe capturado/perdido")
+
+            if (panel_seen and now - start >= max(min_pull_seconds, end_confirm_seconds)
+                    and len(window) >= PULL_END_MIN_FRAMES):
+                none_in_window = sum(1 for _t, is_none in window if is_none)
+                if none_in_window / len(window) >= PULL_END_NONE_RATIO:
+                    _log_pull_end(none_in_window, len(window), none_frames, total_frames,
+                                  end_confirm_seconds)
                     return CastOutcome.CAPTURED
 
             if confirmed and state is not None:
@@ -410,6 +417,22 @@ def run_pulling_phase(sct: mss.MSS, regions: dict, keybinds: dict, shared: Share
     finally:
         if not dry_run:
             input_sim.release_all()
+
+
+def _log_pull_end(none_in_window: int, window_len: int, none_total: int, frames_total: int,
+                  end_confirm_seconds: float) -> None:
+    """Registra o fim da puxada com a estabilidade da leitura do painel: se muitos
+    quadros ficaram sem painel ANTES do fim, a leitura estava instavel (o painel
+    pode ter continuado na tela) -- sem isso, um falso 'capturado' nao deixa rastro."""
+    log.info(f"Painel de pesca sumiu ({none_in_window}/{window_len} quadros dos ultimos "
+             f"{end_confirm_seconds:.1f}s sem painel) -> peixe capturado/perdido")
+    before_total = frames_total - window_len
+    before_none = none_total - none_in_window
+    if before_total >= 30 and before_none / before_total > PULL_UNSTABLE_WARN_RATIO:
+        log.warning(
+            f"Leitura do painel INSTAVEL durante a puxada: {before_none}/{before_total} quadros "
+            f"({before_none / before_total:.0%}) sem painel antes do fim. Se o peixe NAO foi "
+            f"capturado, rode com --debug e mande o fishingbot.log e a pasta debug.")
 
 
 def run_start_sequence(keybinds: dict, dry_run: bool, hwnd: int | None = None) -> None:
