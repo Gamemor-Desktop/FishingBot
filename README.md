@@ -301,6 +301,30 @@ O programa nunca depende de nada especifico da maquina onde foi
 desenvolvido -- tudo isso e recalculado a partir da janela real do jogo em
 cada execucao.
 
+## Arquivos e limpeza automatica (`%LOCALAPPDATA%\FishingBot\`)
+
+| Arquivo | O que e | Limite |
+|---|---|---|
+| `config.json` | so as suas personalizacoes + estado da calibracao | - |
+| `config.reference.json` | padroes atuais, so consulta | regravado a cada abertura |
+| `fishingbot.log` | log do bot | gira a 2 MB, guarda 3 anteriores (`.log.1` a `.3`) |
+| `debug/` | PNGs do `--debug` | 7 dias **e** 100 MB (apaga os mais antigos) |
+| `diagnostics/` | pacotes de quando o bot se desliga sozinho | 10 mais recentes |
+
+## Desenvolvimento e testes
+
+As versoes em `requirements.txt` sao **fixas** (as que os testes e o `.exe`
+foram validados): atualize uma por vez e teste. Para rodar os testes e o lint:
+
+```bat
+venv\Scripts\pip install -r requirements-dev.txt
+venv\Scripts\python -m pytest
+venv\Scripts\python -m pyflakes fishingbot main.py tests
+```
+
+Os testes de visao usam capturas reais do jogo (`tests/fixtures/`); de onde vem
+cada limiar de deteccao esta em [docs/calibracao.md](docs/calibracao.md).
+
 ## Limitacoes conhecidas
 
 - So Windows (usa `pywin32`/DirectInput). Não tem como rodar em outro SO.

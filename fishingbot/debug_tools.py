@@ -37,30 +37,56 @@ _last_event: dict[str, float] = {}
 SAVE_INTERVAL_SECONDS = 1.0
 LOG_INTERVAL_SECONDS = 0.25
 MAX_AGE_DAYS = 7
+MAX_DEBUG_MB = 100          # teto de tamanho da pasta debug/ (apaga os mais antigos)
+PRUNE_EVERY_SAVES = 200     # a cada quantos PNGs salvos reconferir o teto
+_saves_since_prune = 0
 
 
-def _cleanup_old_files() -> None:
-    """Apaga PNGs de debug com mais de MAX_AGE_DAYS. Os nomes de arquivo so
-    tem HHMMSS (sem data), entao sessoes de --debug em dias diferentes nunca
-    se sobrescreveriam sozinhas -- sem isso a pasta cresce pra sempre."""
-    cutoff = time.time() - MAX_AGE_DAYS * 86400
-    removed = 0
+def prune_files(max_age_days: float = MAX_AGE_DAYS, max_bytes: int = MAX_DEBUG_MB * 1024 * 1024) -> int:
+    """Apaga PNGs de debug com mais de `max_age_days` e, depois, os mais antigos
+    ate a pasta caber em `max_bytes`. Os nomes de arquivo so tem HHMMSS (sem
+    data), entao sem isso a pasta cresce pra sempre: uma sessao longa com
+    --debug passa de 100 MB. Devolve quantos arquivos removeu."""
+    cutoff = time.time() - max_age_days * 86400
+    files = []
     for png in debug_dir().glob("*.png"):
         try:
-            if png.stat().st_mtime < cutoff:
-                png.unlink()
-                removed += 1
+            st = png.stat()
+            files.append((st.st_mtime, st.st_size, png))
         except OSError:
             pass
-    if removed:
-        log.info(f"[debug] {removed} screenshot(s) com mais de {MAX_AGE_DAYS} dias removidos de {debug_dir()}")
+    removed = 0
+    kept = []
+    for mtime, size, png in files:
+        if mtime < cutoff:
+            try:
+                png.unlink()
+                removed += 1
+                continue
+            except OSError:
+                pass
+        kept.append((mtime, size, png))
+    kept.sort(key=lambda f: f[0])
+    total = sum(f[1] for f in kept)
+    while total > max_bytes and kept:
+        _mtime, size, png = kept.pop(0)
+        try:
+            png.unlink()
+            removed += 1
+            total -= size
+        except OSError:
+            pass
+    return removed
 
 
 def enable() -> None:
     global _enabled
     _enabled = True
     debug_dir().mkdir(parents=True, exist_ok=True)
-    _cleanup_old_files()
+    removed = prune_files()
+    if removed:
+        log.info(f"[debug] {removed} screenshot(s) antigos removidos de {debug_dir()} "
+                 f"(limite: {MAX_AGE_DAYS} dias / {MAX_DEBUG_MB} MB)")
     log.info(f"Modo debug ativado -- screenshots e proporcoes de cor em {debug_dir()}")
 
 
@@ -112,3 +138,9 @@ def save_roi(name: str, frame_bgr: np.ndarray, mask: np.ndarray | None = None) -
             cv2.imwrite(str(debug_dir() / f"{name}_{ts}_mask.png"), mask)
     except Exception:
         log.exception(f"Falha ao salvar screenshot de debug ({name})")
+        return
+    global _saves_since_prune
+    _saves_since_prune += 1
+    if _saves_since_prune >= PRUNE_EVERY_SAVES:
+        _saves_since_prune = 0
+        prune_files()

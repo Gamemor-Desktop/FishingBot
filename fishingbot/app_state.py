@@ -70,7 +70,6 @@ class SharedState:
 
     casts_done: int = 0
     fish_state_text: str = "-"        # 'Calmo' / 'Puxando forte' / '-'
-    distance_text: str = "-"
 
     error_message: str = ""
 
@@ -115,7 +114,6 @@ class SharedState:
                 "quit_requested": self.quit_requested,
                 "casts_done": self.casts_done,
                 "fish_state_text": self.fish_state_text,
-                "distance_text": self.distance_text,
                 "error_message": self.error_message,
                 "abort_reason": self.abort_reason,
                 "pause_reason": self.pause_reason,

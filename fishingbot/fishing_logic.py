@@ -21,7 +21,7 @@ from .stats import CastOutcome
 log = logging.getLogger("fishingbot")
 
 
-def _read_hook(sct: mss.mss, roi: Region) -> vision.HookReading:
+def _read_hook(sct: mss.MSS, roi: Region) -> vision.HookReading:
     frame = vision.grab(sct, roi.as_roi())
     reading = vision.read_hook(frame, DEFAULT_COLORS["hook_zone"])
     debug_tools.save_roi("hook_zone", frame, reading.mask)
@@ -34,7 +34,7 @@ NO_BITE_YET_MESSAGE = (
 )
 
 
-def wait_for_bite(sct: mss.mss, regions: dict, shared: SharedState, dry_run: bool,
+def wait_for_bite(sct: mss.MSS, regions: dict, shared: SharedState, dry_run: bool,
                    timeout_seconds: float, cast_check_seconds: float) -> bool:
     """Espera a bolinha da mordida aparecer (forma de disco brilhante, ver
     vision.read_hook), em 2 frames seguidos.
@@ -87,7 +87,7 @@ def wait_for_bite(sct: mss.mss, regions: dict, shared: SharedState, dry_run: boo
     return False
 
 
-def run_timing_minigame(sct: mss.mss, regions: dict, keybinds: dict, shared: SharedState,
+def run_timing_minigame(sct: mss.MSS, regions: dict, keybinds: dict, shared: SharedState,
                          dry_run: bool, timeout_seconds: float) -> bool:
     """Espera o peixe vermelho alinhar (proporcao de pixels brilhantes acima de
     hit_min_ratio por `hit_confirm_frames` frames seguidos) e aperta ESPACO."""
@@ -117,7 +117,7 @@ def run_timing_minigame(sct: mss.mss, regions: dict, keybinds: dict, shared: Sha
     return False
 
 
-def classify_pull_state(sct: mss.mss, regions: dict) -> str | None:
+def classify_pull_state(sct: mss.MSS, regions: dict) -> str | None:
     roi = regions["pulling_state"]
     frame = vision.grab(sct, roi.as_roi())
     gray = DEFAULT_COLORS["pulling_gray"]
@@ -150,7 +150,7 @@ def classify_pull_state(sct: mss.mss, regions: dict) -> str | None:
     return None
 
 
-def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: SharedState,
+def run_pulling_phase(sct: mss.MSS, regions: dict, keybinds: dict, shared: SharedState,
                        dry_run: bool, timeout_seconds: float, end_confirm_seconds: float,
                        first_appear_timeout_seconds: float,
                        min_pull_seconds: float) -> CastOutcome:
@@ -283,7 +283,7 @@ def run_start_sequence(keybinds: dict, dry_run: bool, hwnd: int | None = None) -
         input_sim.tap(keybinds["use_item_key"], hold_seconds=0.05)
 
 
-def do_one_cast(sct: mss.mss, regions: dict, keybinds: dict, timings: dict,
+def do_one_cast(sct: mss.MSS, regions: dict, keybinds: dict, timings: dict,
                  shared: SharedState, dry_run: bool = False, hwnd: int | None = None) -> CastOutcome:
     """Executa um ciclo completo de pesca (lancar -> esperar fisgada ->
     timing -> puxar) e devolve COMO terminou (CastOutcome): CAPTURED, ou o
@@ -321,6 +321,6 @@ def do_one_cast(sct: mss.mss, regions: dict, keybinds: dict, timings: dict,
     if outcome is not CastOutcome.CAPTURED:
         return failed(outcome)
 
-    shared.update(casts_done=shared.casts_done + 1, fish_state_text="-", distance_text="-")
+    shared.update(casts_done=shared.casts_done + 1, fish_state_text="-")
     shared.set_state(AppState.CAPTURA_CONCLUIDA)
     return CastOutcome.CAPTURED

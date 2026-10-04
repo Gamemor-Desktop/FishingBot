@@ -20,8 +20,8 @@ pra funcionar em qualquer resolucao.
   vermelha vai de x=24..293, y=528..570; a calibracao anterior (16,403 208x33)
   estava ~125 px mais alta que a caixa real, por isso o bot nunca via o painel
   de verdade e so dava match por coincidencia.
-- `distance_ocr` (95,322 70x30): numero de distancia da linha "LINHA" (opcional,
-  so log/OCR).
+- (removida) `distance_ocr` (95,322 70x30): numero de distancia da linha "LINHA",
+  pra um OCR opcional que nunca foi usado; saiu na limpeza da Fase 4.
 
 ## Fisgada (`hook_zone`)
 

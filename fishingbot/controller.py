@@ -260,7 +260,7 @@ class _HealthMonitor:
     def _loop(self) -> None:
         w = self._window
         try:
-            with mss.mss() as sct:
+            with mss.MSS() as sct:
                 while not self._stop.wait(self._interval):
                     try:
                         thumb = capture_health.grab_thumbnail(sct, w.left, w.top, w.width, w.height)
@@ -569,7 +569,7 @@ class Controller:
             shared, window, require_focus=not self.dry_run,
             pause_timeout=config_store.value(self.cfg, "safety", "pause_timeout_seconds"))
         health = _HealthMonitor(shared, window, regions, self.cfg)
-        sct = mss.mss()
+        sct = mss.MSS()
         try:
             problems = capture_health.validate_regions(regions, sct.monitors[0])
             if problems:
@@ -594,7 +594,7 @@ class Controller:
                     log.error(f"Falha na captura de tela: {exc}")
                     outcome = CastOutcome.CAPTURE_ERROR
                     sct.close()
-                    sct = mss.mss()  # monitor/driver de video pode ter mudado
+                    sct = mss.MSS()  # monitor/driver de video pode ter mudado
 
                 if shared.should_stop_cycle():
                     return

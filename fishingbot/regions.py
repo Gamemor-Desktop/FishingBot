@@ -41,8 +41,6 @@ DEFAULT_FRACTIONS = {
     "hook_zone": _frac(756, 528, 252, 108),
     # linha "PEIXE" (Calmo / Puxando forte); recalibrada em 14/09/2026
     "pulling_state": _frac(24, 528, 270, 43),
-    # numero de distancia na linha "LINHA" (opcional, so log/OCR)
-    "distance_ocr": _frac(95, 322, 70, 30),
 }
 
 # Cores HSV sao independentes de resolucao -- nao precisam de fracao.

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import logging
+import logging.handlers
 import sys
 import threading
 
@@ -25,17 +26,28 @@ from fishingbot.gui import run_app
 from fishingbot.window_detect import setup_dpi_awareness
 
 
+LOG_MAX_BYTES = 2_000_000   # cada arquivo de log; com --debug uma sessao longa passa disso
+LOG_BACKUPS = 3             # fishingbot.log.1 .. .3 (os mais antigos sao descartados)
+
+
 def _setup_logging(debug: bool = False) -> None:
-    log_dir = config_store.config_dir()
-    log_path = log_dir / "fishingbot.log"
-    handlers: list[logging.Handler] = [logging.FileHandler(log_path, encoding="utf-8")]
+    handlers: list[logging.Handler] = []
+    try:
+        log_path = config_store.config_dir() / "fishingbot.log"
+        handlers.append(logging.handlers.RotatingFileHandler(
+            log_path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"))
+    except OSError:
+        pass  # pasta somente leitura/bloqueada: o bot roda mesmo assim, sem arquivo de log
     if sys.stdout is not None:  # no .exe --windowed nao existe stdout
         handlers.append(logging.StreamHandler(sys.stdout))
+    if not handlers:
+        handlers.append(logging.NullHandler())
     logging.basicConfig(
         level=logging.DEBUG if debug else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%H:%M:%S",
         handlers=handlers,
+        force=True,  # configuracao deterministica mesmo se algo ja tiver registrado handlers
     )
 
 

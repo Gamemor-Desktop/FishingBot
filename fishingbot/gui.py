@@ -205,8 +205,6 @@ class FishingBotApp:
         detail_bits = []
         if snap["fish_state_text"] not in ("-", ""):
             detail_bits.append(f"Peixe: {snap['fish_state_text']}")
-        if snap["distance_text"] not in ("-", ""):
-            detail_bits.append(f"Distancia: {snap['distance_text']}")
         self.detail_label.config(text="   ".join(detail_bits))
 
         self.casts_label.config(text=f"Peixes capturados: {snap['casts_done']}")

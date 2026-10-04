@@ -198,11 +198,17 @@ def test_fractions_override_valido_passa_e_invalido_e_ignorado(env):
         "hook_zone": {"fx": 0.40, "fy": 0.5},
         "regiao_que_nao_existe": {"fx": 0.1},
         "pulling_state": {"fx": 5.0},               # fora de 0..1
-        "distance_ocr": {"zz": 0.1},                # chave invalida
     }})
     cfg, warnings = cs.load_config_with_report()
     assert cfg["fractions_override"] == {"hook_zone": {"fx": 0.40, "fy": 0.5}}
-    assert len(warnings) == 3
+    assert len(warnings) == 2
+
+
+def test_fractions_override_com_chave_invalida_e_ignorado(env):
+    _write(env, {"config_version": 2, "fractions_override": {"pulling_state": {"zz": 0.1}}})
+    cfg, warnings = cs.load_config_with_report()
+    assert cfg["fractions_override"] == {}
+    assert len(warnings) == 1
 
 
 def test_estado_da_calibracao_com_tipo_errado_nao_quebra_a_comparacao(env):

@@ -20,7 +20,6 @@ if IS_WINDOWS:
     import ctypes
     import win32gui
     import win32process
-    import win32api
     import win32con
 
 log = logging.getLogger("fishingbot")
@@ -105,17 +104,37 @@ def get_dpi_scale_percent(hwnd: int | None = None) -> int:
         return 100
 
 
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
 def _get_process_name(hwnd: int) -> str:
+    """Nome do .exe dono da janela, ou "" se nao der pra ler. Usa
+    QueryFullProcessImageNameW, que funciona com PROCESS_QUERY_LIMITED_INFORMATION
+    (o GetModuleFileNameEx anterior exige QUERY_INFORMATION + VM_READ, que um
+    processo elevado -- ex: FiveM rodando como administrador -- nega)."""
+    if not IS_WINDOWS:
+        return ""
     try:
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k32.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        handle = win32api.OpenProcess(
-            win32con.PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-        )
+        handle = k32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return ""
         try:
-            path = win32process.GetModuleFileNameEx(handle, 0)
-            return path.rsplit("\\", 1)[-1]
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(len(buf))
+            if not k32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                return ""
+            return buf.value.rsplit("\\", 1)[-1]
         finally:
-            win32api.CloseHandle(handle)
+            k32.CloseHandle(handle)
     except Exception:
         return ""
 

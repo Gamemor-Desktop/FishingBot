@@ -1,7 +1,9 @@
-mss>=9.0.1
-opencv-python>=4.10.0
-numpy>=2.1.0
-pydirectinput>=1.0.4
-keyboard>=0.13.5
-pywin32>=306
-pyinstaller>=6.10.0
+# Versoes FIXAS: sao as que os testes e o .exe foram validados (Python 3.13).
+# Atualize uma por vez, rode `python -m pytest` e teste uma pesca.
+mss==10.2.0
+opencv-python==5.0.0.93
+numpy==2.5.3
+pydirectinput==1.0.4
+keyboard==0.13.5
+pywin32==312
+pyinstaller==6.22.3
