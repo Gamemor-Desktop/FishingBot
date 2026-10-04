@@ -234,3 +234,30 @@ def test_problema_ao_travar_nao_derruba_o_lance_mas_avisa(cast_env, monkeypatch)
     assert out is CastOutcome.NO_BITE                      # seguiu pra espera da mordida
     assert any(m and "NAO foi travada" in m for m in seen)
     assert shared.snapshot()["state"] in (AppState.AGUARDANDO_MINIGAME,)
+
+
+# -- mensagens do --dry-run (o bot nao lanca a vara: precisa dizer isso) --------------------------------------
+
+def test_dry_run_avisa_que_o_usuario_precisa_lancar_a_vara(run):
+    sc = Scenario([(False, None)] * 5000)
+    _result, shared = run(sc, target=7, dry_run=True, max_wait=0.2)
+    msg = shared.snapshot()["status_message"]
+    assert "DRY-RUN" in msg and "LANCE A VARA VOCE MESMO" in msg and "7 m" in msg
+
+
+def test_fora_do_dry_run_a_mensagem_e_a_de_sempre(run):
+    sc = Scenario([(False, None)] * 5000)
+    _result, shared = run(sc, target=7, dry_run=False, max_wait=0.2)
+    msg = shared.snapshot()["status_message"]
+    assert "DRY-RUN" not in msg and "Afundando a linha ate 7 m" in msg
+
+
+def test_lance_em_dry_run_sem_alvo_tambem_avisa(cast_env):
+    calls, timings = cast_env
+    shared = SharedState()
+    shared.update(user_wants_running=True)
+    seen = []
+    real = shared.set_state
+    shared.set_state = lambda st, msg=None: (seen.append(msg), real(st, msg))
+    fl.do_one_cast(None, REGIONS, KEYBINDS, timings, shared, dry_run=True)
+    assert any(m and "LANCE A VARA VOCE MESMO" in m for m in seen)

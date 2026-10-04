@@ -46,6 +46,16 @@ DEPTH_UNREADABLE_WARN_SECONDS = 3.0
 DEPTH_PRESS_VERIFY_SECONDS = 0.8  # quanto esperar o prompt sumir depois de apertar E
 DEPTH_MAX_PRESSES = 2
 
+DRY_RUN_PREFIX = "DRY-RUN (nenhuma tecla e enviada): "
+DRY_RUN_CAST_HINT = "LANCE A VARA VOCE MESMO -- o bot so observa a tela."
+
+
+def _dry(message: str, dry_run: bool) -> str:
+    """Em --dry-run o bot NAO aperta nada (nem a tecla da vara): a mensagem tem
+    que dizer isso e o que se espera do usuario, senao parece que travou."""
+    return f"{DRY_RUN_PREFIX}{message}" if dry_run else message
+
+
 DEPTH_PROBLEM_MESSAGES = {
     DepthLock.UNREADABLE: "Nao consegui ler a profundidade no HUD -- a linha NAO foi travada.",
     DepthLock.TIMEOUT: "A linha nao chegou a profundidade escolhida a tempo -- NAO foi travada.",
@@ -77,7 +87,9 @@ def run_depth_lock(sct: mss.MSS, regions: dict, keybinds: dict, shared: SharedSt
     bites = 0
     unreadable_since: float | None = None
     warned = False
-    shared.set_state(AppState.AGUARDANDO_MINIGAME, f"Afundando a linha ate {target_m} m...")
+    shared.set_state(AppState.AGUARDANDO_MINIGAME,
+                     _dry(f"{DRY_RUN_CAST_HINT} Vou acompanhar a profundidade ate {target_m} m.", dry_run)
+                     if dry_run else f"Afundando a linha ate {target_m} m...")
 
     while time.monotonic() - start < max_wait_seconds:
         if shared.should_stop_cycle():
@@ -409,7 +421,8 @@ def run_start_sequence(keybinds: dict, dry_run: bool, hwnd: int | None = None) -
     # Nao puxamos o jogo pra frente aqui: se o usuario saiu do FiveM, o ciclo
     # esta PAUSADO (shared.checkpoint) e nenhuma tecla chega; e se o foco sumir
     # mesmo assim, a guarda de foco (input_sim) bloqueia a tecla.
-    log.info(f"Pressionando '{keybinds['use_item_key']}' (iniciar pesca)")
+    log.info(f"Pressionando '{keybinds['use_item_key']}' (iniciar pesca)"
+             + (" -- DRY-RUN: tecla NAO enviada, lance a vara voce mesmo" if dry_run else ""))
     if not dry_run:
         input_sim.tap(keybinds["use_item_key"], hold_seconds=0.05)
 
@@ -445,7 +458,9 @@ def do_one_cast(sct: mss.MSS, regions: dict, keybinds: dict, timings: dict,
             log.warning(f"Travar profundidade: {problem}")
             shared.set_state(AppState.AGUARDANDO_MINIGAME, problem)
 
-    shared.set_state(AppState.AGUARDANDO_MINIGAME, "Aguardando a linha afundar e o peixe beliscar...")
+    shared.set_state(AppState.AGUARDANDO_MINIGAME,
+                     _dry(f"{DRY_RUN_CAST_HINT} Aguardando a mordida...", dry_run)
+                     if dry_run else "Aguardando a linha afundar e o peixe beliscar...")
     if not wait_for_bite(sct, regions, shared, dry_run, timings["bite_timeout_seconds"],
                          timings["cast_confirm_seconds"]):
         return failed(CastOutcome.NO_BITE)
