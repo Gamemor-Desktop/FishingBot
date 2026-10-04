@@ -321,3 +321,83 @@ def test_espera_de_foco_respeita_o_botao_parar(ctrl, monkeypatch):
     monkeypatch.setattr(controller_mod, "bring_to_foreground", lambda _h: False)
     ctrl.shared.update(user_wants_running=False)
     assert ctrl._wait_for_game_focus(_window()) is False
+
+
+# -- diagnostico de foco: quem esta com o foco quando o jogo e dado como "sem foco" ----------------
+
+def test_describe_foreground_devolve_texto_com_titulo_e_processo(monkeypatch):
+    from fishingbot import window_detect as wd
+    monkeypatch.setattr(wd.win32gui, "GetForegroundWindow", lambda: 123)
+    monkeypatch.setattr(wd.win32gui, "GetWindowText", lambda h: "Meu Programa Com Titulo")
+    monkeypatch.setattr(wd, "_get_process_name", lambda h: "meu.exe")
+    assert wd.describe_foreground() == "Meu Programa Com Titulo [meu.exe]"
+
+
+def test_describe_foreground_nunca_levanta_excecao(monkeypatch):
+    from fishingbot import window_detect as wd
+
+    def boom():
+        raise OSError("win32")
+    monkeypatch.setattr(wd.win32gui, "GetForegroundWindow", boom)
+    assert wd.describe_foreground() == "?"
+    monkeypatch.setattr(wd.win32gui, "GetForegroundWindow", lambda: 0)
+    assert wd.describe_foreground() == "nenhuma janela"
+
+
+def test_pausa_por_falta_de_foco_diz_quem_esta_com_o_foco(monkeypatch):
+    monkeypatch.setattr(controller_mod.input_sim, "release_all", lambda: None)
+    monkeypatch.setattr(controller_mod, "describe_foreground", lambda: "Claude [claude.exe]")
+    shared = SharedState()
+    shared.update(user_wants_running=True)
+    dog = _dog(shared, _ScriptedAssessor(("pause", "FiveM sem foco")))
+    dog.start()
+    try:
+        assert _wait_for(lambda: "Claude [claude.exe]" in shared.snapshot()["pause_reason"])
+    finally:
+        dog.stop()
+    assert shared.snapshot()["pause_reason"] == "FiveM sem foco (em primeiro plano: Claude [claude.exe])"
+
+
+def test_pausa_minimizado_nao_consulta_o_foco(monkeypatch):
+    monkeypatch.setattr(controller_mod.input_sim, "release_all", lambda: None)
+    chamadas = []
+    monkeypatch.setattr(controller_mod, "describe_foreground", lambda: chamadas.append(1) or "x")
+    shared = SharedState()
+    shared.update(user_wants_running=True)
+    dog = _dog(shared, _ScriptedAssessor(("pause", "FiveM minimizado")))
+    dog.start()
+    try:
+        assert _wait_for(lambda: shared.snapshot()["pause_reason"] == "FiveM minimizado")
+    finally:
+        dog.stop()
+    assert chamadas == []
+
+
+def test_espera_de_foco_registra_quem_estava_com_o_foco(ctrl, monkeypatch, caplog):
+    estado = {"fg": False}
+    monkeypatch.setattr(controller_mod, "is_foreground", lambda _h: estado["fg"])
+    monkeypatch.setattr(controller_mod, "describe_foreground", lambda: "Claude [claude.exe]")
+
+    def traz(_h):
+        estado["fg"] = True
+        return True
+    monkeypatch.setattr(controller_mod, "bring_to_foreground", traz)
+    ctrl.shared.update(user_wants_running=True)
+    with caplog.at_level("INFO", logger="fishingbot"):
+        assert ctrl._wait_for_game_focus(_window()) is True
+    texto = " ".join(r.getMessage() for r in caplog.records)
+    assert "Trazendo o FiveM pra frente" in texto and "Claude [claude.exe]" in texto
+    assert "FiveM em primeiro plano apos" in texto
+
+
+def test_quando_o_windows_recusa_o_log_diz_com_quem_esta_o_foco(ctrl, monkeypatch, caplog):
+    monkeypatch.setattr(controller_mod, "FOCUS_WAIT_TIMEOUT", 0.3)
+    monkeypatch.setattr(controller_mod, "is_foreground", lambda _h: False)
+    monkeypatch.setattr(controller_mod, "bring_to_foreground", lambda _h: False)
+    monkeypatch.setattr(controller_mod, "describe_foreground", lambda: "Discord [Discord.exe]")
+    ctrl.shared.update(user_wants_running=True)
+    with caplog.at_level("INFO", logger="fishingbot"):
+        with pytest.raises(FocusLostError) as exc:
+            ctrl._wait_for_game_focus(_window())
+    assert "Discord [Discord.exe]" in str(exc.value)
+    assert any("nao deixou trazer o FiveM" in r.getMessage() and "Discord" in r.getMessage() for r in caplog.records)

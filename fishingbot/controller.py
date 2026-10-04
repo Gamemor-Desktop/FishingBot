@@ -80,6 +80,7 @@ from .window_detect import (
     WindowInfo,
     bring_to_foreground,
     client_rect,
+    describe_foreground,
     find_fivem_window,
     find_minimized_game_window,
     get_dpi_scale_percent,
@@ -171,6 +172,9 @@ class _WindowWatchdog:
     def _loop(self) -> None:
         paused_since: float | None = None
         ok_streak = 0
+        last_detail = -1e9
+        last_reason = ""
+        detail = ""
         while not self._stop.wait(self._interval):
             try:
                 action, reason = self._assessor.assess()
@@ -188,11 +192,18 @@ class _WindowWatchdog:
             waiting_manual = self._shared.snapshot()["state"] == AppState.AGUARDANDO_CONFIRMACAO_MANUAL
             if action == "pause" and not waiting_manual:
                 now = time.monotonic()
+                if reason == "FiveM sem foco":
+                    if last_reason != reason or now - last_detail >= 1.0:
+                        last_detail = now
+                        detail = f"{reason} (em primeiro plano: {describe_foreground()})"
+                else:
+                    detail = reason
+                last_reason = reason
                 if paused_since is None:
                     paused_since = now
-                    log.info(f"Watchdog: {reason} -> ciclo PAUSADO (volta sozinho quando o jogo voltar)")
+                    log.info(f"Watchdog: {detail} -> ciclo PAUSADO (volta sozinho quando o jogo voltar)")
                     input_sim.release_all()
-                self._shared.set_pause(reason)
+                self._shared.set_pause(detail)
                 ok_streak = 0
                 if now - paused_since > self._pause_timeout:
                     msg = (f"{reason} por mais de {self._pause_timeout:.0f}s -- bot parado. "
@@ -486,18 +497,29 @@ class Controller:
         FOCUS_WAIT_TIMEOUT segundos o usuario clicar no jogo. Retorna False se
         o usuario mandou parar; levanta FocusLostError se estourou o tempo."""
         shared = self.shared
-        deadline = time.monotonic() + FOCUS_WAIT_TIMEOUT
+        started = time.monotonic()
+        deadline = started + FOCUS_WAIT_TIMEOUT
         next_try = 0.0
+        waited = False
         while not self._stop_event.is_set() and shared.user_wants_running:
             if is_foreground(window.hwnd):
+                if waited:
+                    log.info(f"FiveM em primeiro plano apos {time.monotonic() - started:.1f}s")
                 return True
             now = time.monotonic()
             if now >= deadline:
-                raise FocusLostError("Nao consegui trazer o FiveM pra frente e ninguem clicou nele.")
+                raise FocusLostError("Nao consegui trazer o FiveM pra frente e ninguem clicou nele "
+                                     f"(em primeiro plano: {describe_foreground()}).")
             if now >= next_try:
                 next_try = now + FOCUS_RETRY_INTERVAL
+                if not waited:
+                    waited = True
+                    log.info(f"Trazendo o FiveM pra frente (em primeiro plano agora: {describe_foreground()})")
                 if bring_to_foreground(window.hwnd):
+                    log.info(f"FiveM em primeiro plano apos {time.monotonic() - started:.1f}s")
                     return True
+                log.warning("O Windows nao deixou trazer o FiveM pra frente "
+                            f"(em primeiro plano: {describe_foreground()}) -- clique na janela do jogo")
                 shared.set_state(AppState.DETECTANDO_JANELA,
                                   "Clique na janela do FiveM pra comecar a pescar...")
             time.sleep(0.25)

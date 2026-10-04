@@ -232,6 +232,22 @@ def find_fivem_window() -> WindowInfo | None:
     return candidates[0]
 
 
+def describe_foreground() -> str:
+    """Texto curto de quem esta com o foco agora ("Claude [claude.exe]"), pra
+    explicar nos logs/na tela POR QUE o jogo foi considerado 'sem foco'."""
+    if not IS_WINDOWS:
+        return "?"
+    try:
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return "nenhuma janela"
+        title = (win32gui.GetWindowText(hwnd) or "").strip()
+        proc = _get_process_name(hwnd) or "?"
+        return f"{title[:40] or '(sem titulo)'} [{proc}]"
+    except Exception:
+        return "?"
+
+
 def is_foreground(hwnd: int) -> bool:
     """True se `hwnd` e a janela em primeiro plano (a que recebe teclado)
     agora mesmo. Simulacao de teclado (pydirectinput/SendInput) sempre vai
