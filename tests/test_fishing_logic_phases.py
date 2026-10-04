@@ -134,6 +134,39 @@ def test_pausa_nao_conta_como_painel_ausente(monkeypatch):
     assert outcome is CastOutcome.PULL_TIMEOUT
 
 
+def _pull_com_teclas(monkeypatch, pattern, timeout, end_confirm):
+    """Roda a puxada SEM dry-run com o teclado falso; devolve (outcome, t_fim, eventos)."""
+    events = []
+    t0 = time.monotonic()
+    monkeypatch.setattr(fishing_logic.input_sim, "ensure_only",
+                        lambda k: events.append((time.monotonic() - t0, "down", k)))
+    monkeypatch.setattr(fishing_logic.input_sim, "release_all",
+                        lambda: events.append((time.monotonic() - t0, "release", None)))
+    seq = iter(pattern)
+    monkeypatch.setattr(fishing_logic, "classify_pull_state", lambda *_: next(seq, None))
+    outcome = fishing_logic.run_pulling_phase(
+        None, REGIONS, KEYBINDS, _shared(), False, timeout_seconds=timeout,
+        end_confirm_seconds=end_confirm, first_appear_timeout_seconds=1.0, min_pull_seconds=0.0)
+    return outcome, time.monotonic() - t0, events
+
+
+def test_solta_o_s_assim_que_o_painel_some_sem_esperar_a_confirmacao(monkeypatch):
+    """Depois da captura o S nao pode ficar preso durante a janela de confirmacao
+    (o personagem dava passos pra tras)."""
+    outcome, t_fim, events = _pull_com_teclas(monkeypatch, ["gray"] * 10, 5.0, end_confirm=1.0)
+    assert outcome is CastOutcome.CAPTURED
+    releases = [t for t, kind, _ in events if kind == "release"]
+    assert len(releases) >= 2, "uma soltura antecipada + a do finally"
+    assert t_fim - releases[0] > 0.5, "S solto bem antes do fim da confirmacao"
+
+
+def test_leitura_intermitente_nao_solta_a_tecla_no_meio_da_puxada(monkeypatch):
+    """Quadro ruim isolado (painel na tela) nao pode soltar S/W: so a soltura do finally."""
+    pattern = ["gray", "gray", None] * 40
+    _, _, events = _pull_com_teclas(monkeypatch, pattern, 1.0, end_confirm=0.3)
+    assert sum(1 for _, kind, _ in events if kind == "release") == 1
+
+
 def test_fim_da_puxada_registra_a_estabilidade_da_leitura(monkeypatch, caplog):
     """Se muitos quadros ficaram sem painel ANTES do fim, o log avisa -- e e assim que um
     falso 'capturado' passa a deixar rastro."""

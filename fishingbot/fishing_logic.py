@@ -49,6 +49,10 @@ class DepthLock(Enum):
 PULL_END_NONE_RATIO = 0.9
 PULL_END_MIN_FRAMES = 5
 PULL_UNSTABLE_WARN_RATIO = 0.05
+# Painel ausente por tanto tempo SEGUIDO -> solta S/W na hora, sem esperar a confirmacao de
+# fim (end_confirm_seconds, ~1,2 s). Senao o S ficava preso depois da captura e o personagem
+# dava passos pra tras. Se o painel voltar, a tecla e apertada de novo (debounce normal).
+PULL_RELEASE_GRACE_SECONDS = 0.15
 
 DEPTH_POLL_SECONDS = 0.03         # a profundidade sobe ~2 m/s: 30 ms e mais que suficiente
 DEPTH_CONFIRM_READS = 2           # leituras seguidas >= alvo antes de apertar E
@@ -350,6 +354,8 @@ def run_pulling_phase(sct: mss.MSS, regions: dict, keybinds: dict, shared: Share
     start = time.monotonic()
     window: deque = deque()           # (instante, True se o quadro nao tinha painel)
     total_frames = none_frames = 0
+    none_since: float | None = None   # inicio da sequencia atual de quadros sem painel
+    keys_released = False
 
     try:
         while time.monotonic() - start < timeout_seconds:
@@ -363,12 +369,24 @@ def run_pulling_phase(sct: mss.MSS, regions: dict, keybinds: dict, shared: Share
                 window.clear()
                 stable_count = 0
                 last_state = None
+                none_since = None
+                keys_released = False
                 continue
 
             state = classify_pull_state(sct, regions)
             now = time.monotonic()
             total_frames += 1
             none_frames += state is None
+            if state is not None:
+                none_since = None
+                keys_released = False
+            else:
+                if none_since is None:
+                    none_since = now
+                if (panel_seen and not keys_released and not dry_run
+                        and now - none_since >= PULL_RELEASE_GRACE_SECONDS):
+                    input_sim.release_all()
+                    keys_released = True
             window.append((now, state is None))
             while window and now - window[0][0] > end_confirm_seconds:
                 window.popleft()
