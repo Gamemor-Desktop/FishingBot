@@ -46,6 +46,11 @@ STATE_LABELS = {
 }
 
 
+# Texto curto do status em ERRO; o detalhe fica em error_message (rotulo
+# vermelho da interface), pra nao aparecer duas vezes na tela.
+ERRO_STATUS_TEXT = "Parado por seguranca."
+
+
 @dataclass
 class SharedState:
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -68,6 +73,11 @@ class SharedState:
     distance_text: str = "-"
 
     error_message: str = ""
+
+    # Motivo pelo qual o ciclo de pesca em andamento deve ser abortado (janela
+    # sumiu/mudou, detectado pelo watchdog do controlador). Vazio = nenhum.
+    # Qualquer fase checa isso via should_stop_cycle(), sem mudar assinaturas.
+    abort_reason: str = ""
 
     def set_state(self, new_state: AppState, message: str | None = None) -> None:
         with self._lock:
@@ -96,10 +106,31 @@ class SharedState:
                 "fish_state_text": self.fish_state_text,
                 "distance_text": self.distance_text,
                 "error_message": self.error_message,
+                "abort_reason": self.abort_reason,
             }
 
     def should_stop_cycle(self) -> bool:
         """True se a automacao do ciclo atual deve abortar (usuario apertou
-        Parar, ou o app esta sendo fechado)."""
+        Parar, o app esta sendo fechado, ou o watchdog pediu aborto)."""
         with self._lock:
-            return self.quit_requested or not self.user_wants_running
+            return (self.quit_requested or not self.user_wants_running
+                    or bool(self.abort_reason))
+
+    def request_abort(self, reason: str) -> None:
+        """Pede pra abortar o ciclo atual (o primeiro motivo registrado vale)."""
+        with self._lock:
+            if not self.abort_reason:
+                self.abort_reason = reason
+
+    def clear_abort(self) -> None:
+        with self._lock:
+            self.abort_reason = ""
+
+    def fail(self, message: str) -> None:
+        """Parada de seguranca: para o bot, mostra o erro na interface e
+        mantem o estado ERRO ate o usuario apertar INICIAR de novo."""
+        with self._lock:
+            self.user_wants_running = False
+            self.error_message = message
+            self.state = AppState.ERRO
+            self.status_message = ERRO_STATUS_TEXT

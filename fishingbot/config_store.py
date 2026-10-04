@@ -44,6 +44,9 @@ DEFAULTS = {
         "space_key": "space",
         "pull_key": "s",
         "release_key": "w",
+        # parada de emergencia global (ver panic.py): para o bot e solta
+        # todas as teclas, em qualquer estado
+        "panic_key": "f10",
     },
     "timings": {
         "bite_timeout_seconds": 90,

@@ -23,12 +23,22 @@ em manual_control.py e ignorado em qualquer outro estado).
 Quedas de condicao voltam pro estado apropriado em vez de encerrar o
 programa:
     FiveM fechado / janela sumiu -> PROCURANDO_FIVEM
-    Janela mudou de tamanho/posicao/DPI -> CALIBRANDO (recalculo, barato)
+    Janela mudou de tamanho/posicao -> CALIBRANDO (recalculo, barato)
     Minigame nao aparece / desapareceu -> AGUARDANDO_MINIGAME
+
+Seguranca (nada disso depende do ciclo de pesca "se comportar"):
+    - Um watchdog (thread) confere a janela a cada 0.5s DURANTE o ciclo,
+      nao so entre ciclos, e aborta o ciclo se ela sumir ou mudar.
+    - Toda tecla enviada passa pela guarda de foco (input_sim): se o FiveM
+      nao esta em primeiro plano, nada e enviado e o bot para (estado ERRO).
+    - Qualquer excecao nao prevista cai no supervisor de _run: loga o
+      traceback, solta todas as teclas e vai pra ERRO em vez de matar a
+      thread em silencio.
+    - Tecla de panico global (panic.py) e shutdown() soltam tudo.
 
 Sobre o estado CALIBRANDO: so aparece (e so regrava o config.json) quando a
 janela encontrada e DIFERENTE da ultima calibracao salva em
-%LOCALAPPDATA%\FishingBot\config.json (posicao/tamanho/DPI). Se for a mesma
+%LOCALAPPDATA%/FishingBot/config.json (posicao/tamanho/DPI). Se for a mesma
 janela de uma execucao anterior, pula direto pra AGUARDANDO_MINIGAME. Isso
 NAO significa que as regioes ficam "congeladas" de uma vez por todas -- elas
 continuam sendo recalculadas a partir da janela atual a cada execucao (e uma
@@ -46,8 +56,9 @@ import time
 
 import mss
 
-from . import config_store, fishing_logic, manual_control
-from .app_state import AppState, SharedState
+from . import config_store, fishing_logic, input_sim, manual_control, panic
+from .app_state import ERRO_STATUS_TEXT, AppState, SharedState
+from .input_sim import FocusLostError
 from .regions import compute_all_regions
 from .window_detect import (
     WindowInfo,
@@ -64,7 +75,60 @@ log = logging.getLogger("fishingbot")
 
 POLL_WHEN_STOPPED = 0.2      # intervalo de poll quando o usuario nao mandou rodar
 POLL_LOOKING_FOR_FIVEM = 0.7  # intervalo entre tentativas de achar a janela
-WINDOW_CHECK_INTERVAL = 1.0   # com que frequencia reconferir se a janela mudou
+WATCHDOG_INTERVAL = 0.5       # com que frequencia o watchdog reconfere a janela
+FOCUS_WAIT_TIMEOUT = 20.0     # quanto esperar o usuario focar o jogo ao iniciar
+FOCUS_RETRY_INTERVAL = 2.0    # de quanto em quanto tempo tentar trazer o jogo pra frente
+
+
+def check_window_health(window: WindowInfo,
+                        still_valid=window_still_valid,
+                        refresh=refresh_window_rect) -> str | None:
+    """None se a janela segue igual; senao o motivo pra abortar o ciclo.
+    (Funcoes injetaveis so pra poder testar sem o Windows.)"""
+    if not still_valid(window):
+        return "A janela do FiveM sumiu"
+    refreshed = refresh(window)
+    if refreshed is None:
+        return "A janela do FiveM sumiu"
+    if (refreshed.left, refreshed.top, refreshed.width, refreshed.height) != \
+       (window.left, window.top, window.width, window.height):
+        return "A janela do FiveM mudou de posicao/tamanho"
+    return None
+
+
+class _WindowWatchdog:
+    """Thread que confere a janela do jogo a cada WATCHDOG_INTERVAL enquanto
+    um ciclo de pesca roda (que pode durar minutos sem olhar pra janela) e
+    pede aborto via SharedState.request_abort se ela sumir ou mudar."""
+
+    def __init__(self, shared: SharedState, window: WindowInfo,
+                 interval: float = WATCHDOG_INTERVAL, check=check_window_health):
+        self._shared = shared
+        self._window = window
+        self._interval = interval
+        self._check = check
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, name="FishingBotWatchdog", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                reason = self._check(self._window)
+            except Exception:
+                log.exception("Falha no watchdog da janela")
+                reason = "Falha ao conferir a janela do FiveM"
+            if reason:
+                log.info(f"Watchdog: {reason} -> abortando o ciclo atual")
+                self._shared.request_abort(reason)
+                return
 
 
 class Controller:
@@ -81,12 +145,29 @@ class Controller:
         # na frente pra confirmar o passo manual entre uma pesca e outra
         # (ver manual_control.py).
         manual_control.ensure_listener()
+        panic.install(self.panic, self.cfg["keybinds"].get("panic_key", "f10"))
         self._thread = threading.Thread(target=self._run, name="FishingBotController", daemon=True)
         self._thread.start()
 
     def request_quit(self) -> None:
         self.shared.update(quit_requested=True, user_wants_running=False)
         self._stop_event.set()
+
+    def panic(self) -> None:
+        """Parada de emergencia (tecla de panico): para o bot e solta tudo.
+        Pode ser chamada de qualquer thread, em qualquer estado."""
+        key = (panic.active_key() or self.cfg["keybinds"].get("panic_key", "f10")).upper()
+        self.shared.fail(f"PARADA DE EMERGENCIA ({key}) -- bot parado. Aperte INICIAR pra retomar.")
+        input_sim.release_all()
+
+    def shutdown(self, timeout: float = 2.0) -> None:
+        """Encerramento limpo: pede pra parar, espera a thread soltar as
+        teclas (ate `timeout`) e solta tudo de novo por garantia."""
+        self.request_quit()
+        thread = self._thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout)
+        input_sim.release_all()
 
     # -- loop principal ---------------------------------------------------
 
@@ -97,20 +178,43 @@ class Controller:
 
         while not self._stop_event.is_set():
             if not shared.user_wants_running:
-                shared.set_state(AppState.PARADO)
+                # Um erro/panico fica visivel ate o usuario apertar INICIAR
+                # de novo -- nao pode ser apagado por um "Parado" generico.
+                err = shared.snapshot()["error_message"]
+                if err:
+                    shared.set_state(AppState.ERRO, ERRO_STATUS_TEXT)
+                else:
+                    shared.set_state(AppState.PARADO)
                 time.sleep(POLL_WHEN_STOPPED)
                 continue
 
-            window = self._find_window_blocking()
-            if window is None:
-                continue  # _find_window_blocking ja tratou o estado/espera
+            # Supervisor: nada que acontecer dentro de um ciclo pode matar
+            # esta thread em silencio (a interface continuaria mostrando
+            # "Aguardando pesca..." com o bot morto, e tecla presa).
+            try:
+                self._run_once()
+            except FocusLostError as exc:
+                log.warning(f"Foco perdido: {exc}")
+                input_sim.release_all()
+                shared.fail("O FiveM perdeu o foco -- bot parado por seguranca. "
+                            "Volte pro jogo e aperte INICIAR.")
+            except Exception as exc:
+                log.exception("Erro inesperado no controlador -- parando o bot")
+                input_sim.release_all()
+                shared.fail(f"Erro inesperado ({type(exc).__name__}: {exc}). "
+                            f"Veja o fishingbot.log. Aperte INICIAR pra tentar de novo.")
 
-            regions, keybinds, timings = self._calibrate(window)
+    def _run_once(self) -> None:
+        """Uma passada completa: achar janela -> calibrar -> automacao. Volta
+        quando a janela some/muda ou o usuario manda parar; o loop externo
+        reinicia do ponto certo."""
+        self.shared.clear_abort()
+        window = self._find_window_blocking()
+        if window is None:
+            return  # _find_window_blocking ja tratou o estado/espera
 
-            self._automation_loop(window, regions, keybinds, timings)
-            # _automation_loop so retorna quando a janela sumiu, mudou de
-            # forma que precise recalibrar, ou o usuario mandou parar -- o
-            # loop externo trata cada caso reiniciando do ponto certo.
+        regions, keybinds, timings = self._calibrate(window)
+        self._automation_loop(window, regions, keybinds, timings)
 
     # -- fases --------------------------------------------------------------
 
@@ -190,65 +294,78 @@ class Controller:
         timings = self.cfg["timings"]
         return regions, keybinds, timings
 
+    def _wait_for_game_focus(self, window: WindowInfo) -> bool:
+        """Leva o FiveM pra primeiro plano antes de qualquer tecla. Clicar em
+        INICIAR deixa o foco na janela do bot, entao primeiro tentamos trazer
+        o jogo pra frente sozinhos e, se o Windows recusar, esperamos
+        FOCUS_WAIT_TIMEOUT segundos o usuario clicar no jogo. Retorna False se
+        o usuario mandou parar; levanta FocusLostError se estourou o tempo."""
+        shared = self.shared
+        deadline = time.monotonic() + FOCUS_WAIT_TIMEOUT
+        next_try = 0.0
+        while not self._stop_event.is_set() and shared.user_wants_running:
+            if is_foreground(window.hwnd):
+                return True
+            now = time.monotonic()
+            if now >= deadline:
+                raise FocusLostError("Nao consegui trazer o FiveM pra frente e ninguem clicou nele.")
+            if now >= next_try:
+                next_try = now + FOCUS_RETRY_INTERVAL
+                if bring_to_foreground(window.hwnd):
+                    return True
+                shared.set_state(AppState.DETECTANDO_JANELA,
+                                  "Clique na janela do FiveM pra comecar a pescar...")
+            time.sleep(0.25)
+        return False
+
     def _automation_loop(self, window: WindowInfo, regions: dict, keybinds: dict, timings: dict) -> None:
         """Roda ciclos de pesca ate a janela sumir/mudar ou o usuario parar."""
         shared = self.shared
-        last_window_check = 0.0
 
         # Simulacao de teclado vai sempre pra janela em primeiro plano do
-        # sistema -- garante que e o FiveM logo ao entrar na automacao, em
-        # vez de descobrir so quando uma tecla nao chega no jogo.
-        if not self.dry_run and not is_foreground(window.hwnd):
-            if not bring_to_foreground(window.hwnd):
-                log.warning(
-                    "FiveM nao esta em primeiro plano e nao consegui trazer ele pra frente "
-                    "automaticamente -- clique na janela do jogo, senao as teclas simuladas "
-                    "podem nao chegar nele."
-                )
+        # sistema -- so comecamos com o FiveM de fato em foco, e a guarda de
+        # foco (input_sim) bloqueia qualquer tecla se ele perder o foco depois.
+        if not self.dry_run:
+            if not self._wait_for_game_focus(window):
+                return
+            input_sim.set_focus_guard(lambda: is_foreground(window.hwnd))
 
-        with mss.mss() as sct:
-            while not self._stop_event.is_set() and shared.user_wants_running:
-                now = time.time()
-                if now - last_window_check >= WINDOW_CHECK_INTERVAL:
-                    last_window_check = now
-                    if not window_still_valid(window):
-                        log.info("Janela do FiveM sumiu -> voltando a procurar")
+        watchdog = _WindowWatchdog(shared, window)
+        watchdog.start()
+        try:
+            with mss.mss() as sct:
+                while not self._stop_event.is_set() and shared.user_wants_running:
+                    if shared.should_stop_cycle():
+                        return  # watchdog pediu aborto (janela sumiu/mudou)
+
+                    shared.set_state(AppState.AGUARDANDO_MINIGAME)
+                    completed = fishing_logic.do_one_cast(sct, regions, keybinds, timings, shared,
+                                                            self.dry_run, hwnd=window.hwnd)
+
+                    if shared.should_stop_cycle():
                         return
-                    refreshed = refresh_window_rect(window)
-                    if refreshed is None:
-                        return
-                    if (refreshed.left, refreshed.top, refreshed.width, refreshed.height) != \
-                       (window.left, window.top, window.width, window.height):
-                        log.info("Janela do FiveM mudou de posicao/tamanho -> recalibrando")
-                        window = refreshed
-                        regions, keybinds, timings = self._calibrate(window)
 
-                shared.set_state(AppState.AGUARDANDO_MINIGAME)
-                completed = fishing_logic.do_one_cast(sct, regions, keybinds, timings, shared,
-                                                        self.dry_run, hwnd=window.hwnd)
+                    if completed:
+                        time.sleep(0.8)  # deixa o texto "Peixe capturado!" visivel um instante
 
-                if shared.should_stop_cycle():
-                    return
+                        # Etapa manual (nao automatizada por enquanto): o
+                        # jogador precisa pegar o peixe no chao e corta-lo/
+                        # processa-lo antes de estar pronto pra uma nova
+                        # pescaria. O bot NAO inicia sozinho aqui -- fica
+                        # parado ate o jogador apertar ENTER (o unico gatilho
+                        # de teclado usado pelo usuario; ignorado em qualquer
+                        # outro estado, ver manual_control.py).
+                        shared.set_state(AppState.AGUARDANDO_CONFIRMACAO_MANUAL)
+                        log.info("Peixe capturado -- aguardando o jogador pegar/cortar o peixe "
+                                 "e apertar ENTER pra continuar.")
 
-                if completed:
-                    time.sleep(0.8)  # deixa o texto "Peixe capturado!" visivel um instante
-
-                    # Etapa manual (nao automatizada por enquanto): o
-                    # jogador precisa pegar o peixe no chao e corta-lo/
-                    # processa-lo antes de estar pronto pra uma nova
-                    # pescaria. O bot NAO inicia sozinho aqui -- fica
-                    # parado ate o jogador apertar ENTER (o unico gatilho
-                    # de teclado usado pelo usuario; ignorado em qualquer
-                    # outro estado, ver manual_control.py).
-                    shared.set_state(AppState.AGUARDANDO_CONFIRMACAO_MANUAL)
-                    log.info("Peixe capturado -- aguardando o jogador pegar/cortar o peixe "
-                             "e apertar ENTER pra continuar.")
-
-                    confirmed = manual_control.wait_for_confirmation(
-                        lambda: shared.should_stop_cycle() or not window_still_valid(window)
-                    )
-                    if not confirmed:
-                        return
-                    log.info("ENTER recebido -> retomando automacao pra proxima pescaria.")
-                else:
-                    time.sleep(0.5)
+                        confirmed = manual_control.wait_for_confirmation(shared.should_stop_cycle)
+                        if not confirmed:
+                            return
+                        log.info("ENTER recebido -> retomando automacao pra proxima pescaria.")
+                    else:
+                        time.sleep(0.5)
+        finally:
+            watchdog.stop()
+            input_sim.set_focus_guard(None)
+            input_sim.release_all()

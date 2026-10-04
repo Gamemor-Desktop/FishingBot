@@ -9,6 +9,7 @@ import logging
 import tkinter as tk
 from tkinter import ttk
 
+from . import panic
 from .app_state import AppState, SharedState
 from .controller import Controller
 
@@ -43,9 +44,12 @@ class FishingBotApp:
         self.controller = Controller(self.shared, dry_run=dry_run)
 
         root.title("FishingBot")
-        root.geometry("340x400")
+        root.geometry("340x430")
         root.resizable(False, False)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # excecao dentro de um callback do Tk: loga o traceback (por padrao
+        # ele so iria pro stderr, que nao existe no .exe --windowed)
+        root.report_callback_exception = self._on_tk_exception
 
         self._build_widgets()
         self.controller.start()
@@ -106,12 +110,15 @@ class FishingBotApp:
                                      wraplength=310, justify="left")
         self.error_label.pack(fill="x", padx=10, pady=(6, 0))
 
+        self.panic_label = tk.Label(self.root, text="", font=("Segoe UI", 8), fg="#555555")
+        self.panic_label.pack(side="bottom", pady=(0, 8))
+
         self._set_buttons_state(running=False)
 
     # -- acoes dos botoes -----------------------------------------------
 
     def _on_start(self) -> None:
-        self.shared.update(user_wants_running=True)
+        self.shared.update(user_wants_running=True, error_message="")
         self._set_buttons_state(running=True)
 
     def _on_stop(self) -> None:
@@ -119,8 +126,14 @@ class FishingBotApp:
         self._set_buttons_state(running=False)
 
     def _on_close(self) -> None:
-        self.controller.request_quit()
-        self.root.after(150, self.root.destroy)
+        # espera a thread do controlador soltar as teclas antes de fechar
+        # (ela e daemon: sem isso, fechar no meio de uma puxada podia deixar
+        # S/W apertadas)
+        self.controller.shutdown(timeout=2.0)
+        self.root.destroy()
+
+    def _on_tk_exception(self, exc_type, exc, tb) -> None:
+        log.error("Excecao no callback da interface", exc_info=(exc_type, exc, tb))
 
     def _set_buttons_state(self, running: bool) -> None:
         self.start_btn.config(state="disabled" if running else "normal")
@@ -164,6 +177,12 @@ class FishingBotApp:
         self.casts_label.config(text=f"Peixes capturados: {snap['casts_done']}")
 
         self.error_label.config(text=snap["error_message"])
+
+        key = panic.active_key()
+        self.panic_label.config(
+            text=f"Parada de emergencia: {key.upper()}" if key
+            else "Tecla de emergencia INDISPONIVEL -- use o botao PARAR",
+            fg="#555555" if key else "#c62828")
 
         # mantem os botoes coerentes mesmo se o estado mudar por outro
         # motivo (ex: FiveM fechou e o controller nao alterou user_wants_running)

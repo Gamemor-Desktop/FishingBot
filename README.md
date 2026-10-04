@@ -39,7 +39,8 @@ fora do git.
    **ENTER** pra o bot lançar a vara de novo. O ENTER so tem efeito nesse
    momento especifico; apertado em qualquer outra hora (durante o minigame,
    por exemplo) e ignorado, de proposito, pra nao atrapalhar a automacao.
-6. **PARAR** interrompe a automacao e solta qualquer tecla que estivesse
+6. **F10** (tecla de emergencia) para tudo na hora, mesmo com o jogo em foco.
+   **PARAR** interrompe a automacao e solta qualquer tecla que estivesse
    sendo segurada, na hora -- inclusive se estiver parado esperando o ENTER
    da etapa manual.
 
@@ -128,10 +129,35 @@ todos caem nas mesmas coordenadas fisicas.
 `window_detect.find_fivem_window()` enumera as janelas visiveis do sistema
 e procura pelo PROCESSO cujo executavel contenha "gtaprocess" (o processo
 real do jogo dentro do FiveM, ex: `FiveM_b3751_GTAProcess.exe` -- o numero
-de build muda a cada versao, por isso o match e por substring). Se por
-algum motivo isso nao bater, cai pra um fallback por titulo da janela
-contendo "fivem". Entre candidatas, fica com a de maior area (evita pegar
-alguma janela auxiliar pequena).
+de build muda a cada versao, por isso o match e por substring) **ou** pela
+classe de janela `grcWindow` (a do GTA V; cobre o caso do processo nao ser
+legivel). O **titulo da janela nao conta**: qualquer aba de navegador pode
+ter "FiveM" no titulo e o bot manda teclas pra janela que achar. Entre
+candidatas, fica com a de maior area (evita pegar alguma janela auxiliar
+pequena).
+
+### Seguranca (o que impede o bot de causar dano)
+
+- **Guarda de foco** (`input_sim.py`): toda tecla enviada passa por uma
+  checagem de que o FiveM esta em primeiro plano. Se nao estiver (alt-tab,
+  outro app), **nada e enviado**, as teclas seguradas sao soltas e o bot para
+  com o aviso "O FiveM perdeu o foco". Ao apertar INICIAR o bot tenta trazer o
+  jogo pra frente e, se o Windows recusar, espera ate 20 s voce clicar nele.
+- **Tecla de emergencia** (`panic.py`, padrao **F10**, configuravel em
+  `keybinds.panic_key`): funciona em qualquer estado, com o jogo em foco. Para
+  o bot, solta todas as teclas e deixa o estado "Parado por seguranca" na tela
+  ate voce apertar INICIAR de novo. Se o hook global nao puder ser registrado
+  (jogo rodando como administrador), a interface avisa e o botao PARAR continua
+  valendo.
+- **Watchdog da janela**: durante o ciclo de pesca (que pode durar minutos) a
+  janela e conferida a cada 0,5 s; se sumir ou mudar de posicao/tamanho, o
+  ciclo e abortado e o bot volta a procurar/recalibrar.
+- **Supervisor**: qualquer erro inesperado e logado com traceback em
+  `fishingbot.log`, solta as teclas e leva o bot ao estado de erro (antes a
+  thread morria em silencio e a tela continuava dizendo "Aguardando pesca...").
+- **Fechar o app** espera o controlador soltar as teclas; ha tambem `atexit` e
+  hooks de excecao nao tratada como ultima rede de seguranca.
+- **Instancia unica**: abrir um segundo `FishingBot.exe` mostra um aviso e sai.
 
 ### Maquina de estados
 
@@ -183,7 +209,7 @@ Criado automaticamente na primeira execucao. Guarda:
   usado pra decidir quando vale a pena regravar o arquivo (a recalibracao
   em si acontece toda vez que a janela muda, isso so evita escrever no
   disco a cada frame).
-- `keybinds` — teclas usadas (`use_item_key`, `space_key`, `pull_key`,
+- `keybinds` — teclas usadas (`use_item_key`, `space_key`, `pull_key`, `panic_key`,
   `release_key`). Editavel se o seu servidor usar binds diferentes.
 - `timings` — timeouts de cada fase em segundos.
 - `fractions_override` — pra ajuste fino manual das regioes do minigame,

@@ -15,11 +15,12 @@ Uso: FishingBot.exe [--dry-run] [--debug]
 from __future__ import annotations
 
 import argparse
+import atexit
 import logging
-import os
 import sys
+import threading
 
-from fishingbot import config_store, debug_tools
+from fishingbot import config_store, debug_tools, input_sim, single_instance
 from fishingbot.gui import run_app
 from fishingbot.window_detect import setup_dpi_awareness
 
@@ -27,20 +28,44 @@ from fishingbot.window_detect import setup_dpi_awareness
 def _setup_logging(debug: bool = False) -> None:
     log_dir = config_store.config_dir()
     log_path = log_dir / "fishingbot.log"
+    handlers: list[logging.Handler] = [logging.FileHandler(log_path, encoding="utf-8")]
+    if sys.stdout is not None:  # no .exe --windowed nao existe stdout
+        handlers.append(logging.StreamHandler(sys.stdout))
     logging.basicConfig(
         level=logging.DEBUG if debug else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%H:%M:%S",
-        handlers=[
-            logging.FileHandler(log_path, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=handlers,
     )
+
+
+def _install_crash_hooks() -> None:
+    """Excecao nao tratada (qualquer thread): vai pro log com traceback e
+    solta todas as teclas -- no .exe --windowed o stderr nao existe, entao
+    sem isso o erro some sem deixar rastro."""
+    log = logging.getLogger("fishingbot")
+
+    def _main_hook(exc_type, exc, tb):
+        log.critical("Excecao nao tratada", exc_info=(exc_type, exc, tb))
+        input_sim.release_all()
+
+    def _thread_hook(args):
+        log.critical(f"Excecao nao tratada na thread {args.thread.name if args.thread else '?'}",
+                     exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+        input_sim.release_all()
+
+    sys.excepthook = _main_hook
+    threading.excepthook = _thread_hook
 
 
 def main() -> None:
     if sys.platform != "win32":
         print("FishingBot so funciona no Windows (depende de pywin32/DirectInput).")
+        sys.exit(1)
+
+    # Duas instancias mandariam teclas em dobro pro jogo.
+    if not single_instance.acquire():
+        single_instance.show_already_running_message()
         sys.exit(1)
 
     # DPI-aware o mais cedo possivel, antes de qualquer coisa que consulte
@@ -56,6 +81,8 @@ def main() -> None:
     args = parser.parse_args()
 
     _setup_logging(debug=args.debug)
+    _install_crash_hooks()
+    atexit.register(input_sim.release_all)  # ultima rede de seguranca ao sair
     if args.debug:
         debug_tools.enable()
     logging.getLogger("fishingbot").info(f"FishingBot iniciando (dry_run={args.dry_run}, debug={args.debug})")

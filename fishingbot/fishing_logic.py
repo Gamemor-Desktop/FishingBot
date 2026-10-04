@@ -208,8 +208,8 @@ def run_start_sequence(keybinds: dict, dry_run: bool, hwnd: int | None = None) -
         if not window_detect.bring_to_foreground(hwnd):
             log.warning(
                 "FiveM nao esta em primeiro plano e nao consegui trazer ele pra frente "
-                "automaticamente (o Windows as vezes bloqueia isso) -- clique na janela "
-                "do jogo AGORA, senao esta tecla nao vai chegar nele."
+                "automaticamente (o Windows as vezes bloqueia isso) -- a tecla NAO sera "
+                "enviada (guarda de foco); o bot vai parar."
             )
     log.info(f"Pressionando '{keybinds['use_item_key']}' (iniciar pesca)")
     if not dry_run:

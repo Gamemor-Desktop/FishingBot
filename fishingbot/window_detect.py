@@ -42,11 +42,22 @@ class WindowInfo:
         return (self.left, self.top, self.width, self.height)
 
 
-# Padroes usados pra identificar a janela do jogo em si (nao o launcher, nao
-# splash screens). O executavel real do jogo dentro do FiveM costuma se
-# chamar algo como 'FiveM_b3751_GTAProcess.exe' (o numero de build varia).
+# Como identificar a janela do jogo em si (nao o launcher, nao splash
+# screens, e principalmente nao um navegador/terminal com "FiveM" no titulo):
+# o executavel real do jogo dentro do FiveM se chama algo como
+# 'FiveM_b3751_GTAProcess.exe' (o numero de build varia), e a janela dele usa
+# a classe 'grcWindow' (a mesma do GTA V). Basta UM dos dois bater -- o titulo
+# NAO conta: ele muda com o servidor e qualquer aba de navegador pode ter
+# "FiveM" nele, e o bot manda teclas pra janela que ele achar.
 _PROCESS_NAME_HINTS = ("gtaprocess",)
-_TITLE_HINTS = ("fivem",)
+_WINDOW_CLASSES = ("grcwindow",)
+
+
+def is_game_window(process_name: str, class_name: str) -> bool:
+    """True se (processo, classe) identificam a janela do jogo FiveM/GTA."""
+    proc = (process_name or "").lower()
+    cls = (class_name or "").lower()
+    return any(h in proc for h in _PROCESS_NAME_HINTS) or cls in _WINDOW_CLASSES
 
 
 def setup_dpi_awareness() -> None:
@@ -110,17 +121,17 @@ def _get_process_name(hwnd: int) -> str:
 
 
 def find_fivem_window() -> WindowInfo | None:
-    """Procura entre as janelas visiveis de topo a que pertence ao processo
-    do jogo FiveM (nao o launcher). Entre candidatas, escolhe a de maior
-    area visivel (a janela do jogo em si, nao alguma janela auxiliar
-    pequena). Retorna None se nao encontrar nenhuma.
+    """Procura entre as janelas visiveis de topo a que e a do jogo FiveM
+    (processo *GTAProcess* ou classe 'grcWindow', ver is_game_window; o
+    titulo nunca conta). Entre candidatas, escolhe a de maior area (a janela
+    do jogo em si, nao alguma janela auxiliar pequena). Retorna None se nao
+    encontrar nenhuma.
 
     Com o logger em nivel DEBUG (--debug), quando NENHUMA candidata bate,
-    loga todas as janelas visiveis com titulo nao-vazio (titulo + nome do
-    processo) que o EnumWindows encontrou -- serve pra descobrir rapido se o
-    titulo/processo real da janela do FiveM e diferente do que os hints
-    (_PROCESS_NAME_HINTS / _TITLE_HINTS) esperam, em vez de ficar tentando
-    adivinhar as cegas."""
+    loga todas as janelas visiveis com titulo nao-vazio (titulo + processo +
+    classe) que o EnumWindows encontrou -- serve pra descobrir rapido se o
+    processo/classe real da janela do FiveM e diferente do que
+    _PROCESS_NAME_HINTS / _WINDOW_CLASSES esperam."""
     if not IS_WINDOWS:
         return None
 
@@ -135,16 +146,15 @@ def find_fivem_window() -> WindowInfo | None:
             return
         title = win32gui.GetWindowText(hwnd) or ""
         proc_name = _get_process_name(hwnd)
-        proc_name_lc = proc_name.lower()
-        title_lc = title.lower()
+        try:
+            class_name = win32gui.GetClassName(hwnd) or ""
+        except Exception:
+            class_name = ""
 
         if debug_on and title.strip():
-            seen.append(f"titulo={title!r} processo={proc_name!r}")
+            seen.append(f"titulo={title!r} processo={proc_name!r} classe={class_name!r}")
 
-        matches_process = any(h in proc_name_lc for h in _PROCESS_NAME_HINTS)
-        matches_title = any(h in title_lc for h in _TITLE_HINTS) and title.strip() != ""
-
-        if not (matches_process or matches_title):
+        if not is_game_window(proc_name, class_name):
             return
 
         try:
@@ -188,21 +198,19 @@ def find_fivem_window() -> WindowInfo | None:
             if seen:
                 log.debug(f"[debug] find_fivem_window: nenhuma candidata bateu em "
                           f"_PROCESS_NAME_HINTS={_PROCESS_NAME_HINTS} / "
-                          f"_TITLE_HINTS={_TITLE_HINTS}. Janelas visiveis com titulo: {seen}")
+                          f"_WINDOW_CLASSES={_WINDOW_CLASSES}. Janelas visiveis com titulo: {seen}")
             else:
                 log.debug("[debug] find_fivem_window: nenhuma janela visivel com titulo "
                           "encontrada nesta varredura (EnumWindows nao achou nada com texto)")
         return None
 
-    # Prioriza match por PROCESSO (mais confiavel que titulo, que muda com o
-    # nome do servidor). Entre elas, pega a de maior area.
-    by_process = [c for c in candidates if any(h in c.process_name.lower() for h in _PROCESS_NAME_HINTS)]
-    pool = by_process if by_process else candidates
-    pool.sort(key=lambda c: c.width * c.height, reverse=True)
+    # Entre as candidatas, pega a de maior area.
+    candidates.sort(key=lambda c: c.width * c.height, reverse=True)
     if debug_on and len(candidates) > 1:
         log.debug(f"[debug] find_fivem_window: {len(candidates)} candidata(s) batida(s), "
-                  f"escolhida a maior: {pool[0].title!r} {pool[0].width}x{pool[0].height}")
-    return pool[0]
+                  f"escolhida a maior: {candidates[0].title!r} "
+                  f"{candidates[0].width}x{candidates[0].height}")
+    return candidates[0]
 
 
 def is_foreground(hwnd: int) -> bool:
