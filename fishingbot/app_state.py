@@ -84,6 +84,7 @@ class SharedState:
     # teclas, sem gastar timeout) e seguem de onde pararam quando o jogo volta.
     pause_reason: str = ""
 
+    config_notice: str = ""       # aviso de valores invalidos corrigidos no config.json
     stats_text: str = ""          # resumo da sessao (lances, capturas, falhas seguidas)
     # time.monotonic() do ultimo "progresso" (inicio da automacao, captura,
     # retomada pelo ENTER). O monitor de saude para o bot se isto ficar velho.
@@ -119,6 +120,7 @@ class SharedState:
                 "abort_reason": self.abort_reason,
                 "pause_reason": self.pause_reason,
                 "stats_text": self.stats_text,
+                "config_notice": self.config_notice,
                 "last_progress_at": self.last_progress_at,
             }
 

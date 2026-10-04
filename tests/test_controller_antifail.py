@@ -275,4 +275,4 @@ def test_wait_for_bite_pausado_acorda_e_para_se_mandarem_parar():
     shared.set_pause("FiveM minimizado")
     threading.Timer(0.2, lambda: shared.update(user_wants_running=False)).start()
     assert fishing_logic.wait_for_bite(_NoScreen(), {"hook_zone": Region(0, 0, 10, 10)},
-                                       shared, True, 30.0) is False
+                                       shared, True, 30.0, 45.0) is False

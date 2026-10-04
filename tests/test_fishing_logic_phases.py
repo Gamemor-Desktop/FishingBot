@@ -26,13 +26,13 @@ def test_pausa_nao_consome_o_timeout_da_mordida(make_sct):
     shared.set_pause("FiveM minimizado")
     threading.Timer(1.0, shared.clear_pause).start()
     sct = make_sct("hook_zone", "010829")           # bolinha presente
-    assert fishing_logic.wait_for_bite(sct, REGIONS, shared, True, 0.6) is True
+    assert fishing_logic.wait_for_bite(sct, REGIONS, shared, True, 0.6, 45.0) is True
 
 
 def test_sem_pausa_o_mesmo_timeout_estoura(make_sct):
     """Contraprova: sem bolinha, o timeout de 0.3s estoura normalmente."""
     sct = make_sct("hook_zone", "010809")           # cena vazia
-    assert fishing_logic.wait_for_bite(sct, REGIONS, _shared(), True, 0.3) is False
+    assert fishing_logic.wait_for_bite(sct, REGIONS, _shared(), True, 0.3, 45.0) is False
 
 
 def _pull(monkeypatch, states, **kw):

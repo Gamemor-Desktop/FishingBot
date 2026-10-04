@@ -218,16 +218,15 @@ class _HealthMonitor:
 
     def __init__(self, shared: SharedState, window: WindowInfo, regions: dict, cfg: dict,
                  interval: float = 1.0):
-        safety = cfg.get("safety", {})
         self._shared = shared
         self._window = window
         self._regions = regions
         self._cfg = cfg
         self._interval = interval
-        self._progress_limit = config_store.number(safety, "progress_timeout_minutes", 15, 0.5) * 60
+        self._progress_limit = config_store.value(cfg, "safety", "progress_timeout_minutes") * 60
         self._capture = capture_health.CaptureMonitor(
-            black_seconds=config_store.number(safety, "black_screen_seconds", 3.0, 0.5),
-            frozen_seconds=config_store.number(safety, "frozen_screen_seconds", 15.0, 1.0),
+            black_seconds=config_store.value(cfg, "safety", "black_screen_seconds"),
+            frozen_seconds=config_store.value(cfg, "safety", "frozen_screen_seconds"),
         )
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="FishingBotHealth", daemon=True)
@@ -291,7 +290,12 @@ class Controller:
         self._pending_manual = False
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self.cfg = config_store.load_config()
+        self.cfg, self.config_warnings = config_store.load_config_with_report()
+        for warning in self.config_warnings:
+            log.warning(f"Config: {warning}")
+        if self.config_warnings:
+            shared.update(config_notice=f"Config: {len(self.config_warnings)} aviso(s) -- "
+                                        f"valores invalidos voltaram ao padrao (veja o log)")
 
     def start(self) -> None:
         setup_dpi_awareness()
@@ -489,9 +493,8 @@ class Controller:
             time.sleep(min(0.1, max(0.0, end - time.monotonic())))
 
     def _backoff_seconds(self) -> float:
-        safety = self.cfg.get("safety", {})
-        base = config_store.number(safety, "retry_backoff_base_seconds", 0.5, 0.0)
-        cap = config_store.number(safety, "retry_backoff_max_seconds", 5.0, 0.0)
+        base = config_store.value(self.cfg, "safety", "retry_backoff_base_seconds")
+        cap = config_store.value(self.cfg, "safety", "retry_backoff_max_seconds")
         return min(base * (2 ** max(0, self.stats.consecutive_failures - 1)), cap)
 
     def _handle_outcome(self, outcome: CastOutcome, sct, window: WindowInfo, regions: dict) -> bool:
@@ -508,7 +511,7 @@ class Controller:
             self.shared.mark_progress()
             return True
 
-        limit = int(config_store.number(self.cfg.get("safety", {}), "max_consecutive_failures", 5, 1))
+        limit = int(config_store.value(self.cfg, "safety", "max_consecutive_failures"))
         if self.stats.consecutive_failures >= limit:
             reason = (f"{self.stats.consecutive_failures} lances seguidos falharam "
                       f"({self.stats.breakdown()}). A deteccao parece desalinhada com o jogo.")
@@ -522,7 +525,7 @@ class Controller:
         self._sleep(self._backoff_seconds())
         return True
 
-    def _manual_wait(self, timings: dict) -> bool:
+    def _manual_wait(self) -> bool:
         """Etapa manual (nao automatizada por enquanto): o jogador precisa
         pegar o peixe no chao e corta-lo/processa-lo antes de estar pronto
         pra uma nova pescaria. O bot NAO inicia sozinho aqui -- fica parado
@@ -541,7 +544,7 @@ class Controller:
         log.info("Confirmacao recebida -> retomando automacao pra proxima pescaria.")
         shared.mark_progress()
         # o personagem ainda pode estar na animacao de cortar o peixe
-        self._sleep(config_store.number(timings, "after_confirm_delay_seconds", 1.5, 0.0))
+        self._sleep(config_store.value(self.cfg, "timings", "after_confirm_delay_seconds"))
         return True
 
     def _automation_loop(self, window: WindowInfo, regions: dict, keybinds: dict, timings: dict) -> None:
@@ -551,7 +554,7 @@ class Controller:
         # Se o laco reiniciou (janela mudou/sumiu) enquanto o jogador ainda
         # pegava/cortava o peixe, continua esperando a confirmacao dele em vez
         # de lancar a vara por conta propria.
-        if self._pending_manual and not self._manual_wait(timings):
+        if self._pending_manual and not self._manual_wait():
             return
 
         # Simulacao de teclado vai sempre pra janela em primeiro plano do
@@ -564,7 +567,7 @@ class Controller:
 
         watchdog = _WindowWatchdog(
             shared, window, require_focus=not self.dry_run,
-            pause_timeout=config_store.number(self.cfg.get("safety", {}), "pause_timeout_seconds", 120, 5))
+            pause_timeout=config_store.value(self.cfg, "safety", "pause_timeout_seconds"))
         health = _HealthMonitor(shared, window, regions, self.cfg)
         sct = mss.mss()
         try:
@@ -601,7 +604,7 @@ class Controller:
 
                 if outcome is CastOutcome.CAPTURED:
                     time.sleep(0.8)  # deixa o texto "Peixe capturado!" visivel um instante
-                    if not self._manual_wait(timings):
+                    if not self._manual_wait():
                         return
         finally:
             health.stop()

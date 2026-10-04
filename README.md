@@ -86,7 +86,12 @@ fishingbot/
   app_state.py              estado compartilhado entre a UI e o controlador (thread-safe)
   window_detect.py          localizar a janela do FiveM, DPI awareness, client area
   regions.py                regioes do minigame como FRACOES da janela (nao pixels fixos)
-  config_store.py           persistencia em %LOCALAPPDATA%\FishingBot\config.json
+  config_store.py           config.json (so overrides), migracao, validacao, padroes
+  stats.py                  resultado de cada lance + estatisticas da sessao
+  capture_health.py         tela preta/congelada, regioes dentro da tela
+  diagnostics.py            pacote de diagnostico quando o bot se desliga sozinho
+  panic.py                  tecla de emergencia global (F10)
+  single_instance.py        impede abrir duas instancias
   vision.py                 captura de tela + deteccao de cor (OpenCV + mss)
   input_sim.py              simulacao de teclado (pydirectinput)
   fishing_logic.py          as fases do minigame (fisgar, timing, puxar)
@@ -254,7 +259,26 @@ nao interferir na automacao.
 
 ## Configuracao (`%LOCALAPPDATA%\FishingBot\config.json`)
 
-Criado automaticamente na primeira execucao. Guarda:
+Criado automaticamente na primeira execucao. **O arquivo guarda so o que voce
+mudou** (mais `config_version` e o estado da ultima calibracao): o que nao esta
+nele usa o padrao do programa, entao quando um padrao melhora ele chega a voce
+sozinho. A lista completa e atual dos padroes fica em `config.reference.json`
+(regravado a cada abertura, so pra consulta -- editar esse nao tem efeito;
+coloque no `config.json` apenas os valores que quer trocar, ex.
+`{"timings": {"bite_timeout_seconds": 60}}`).
+
+- **Migracao:** um `config.json` de versoes antigas (que gravava todos os
+  padroes) e migrado sozinho: so as suas personalizacoes sao mantidas e o
+  original vira `config.json.v1.bak`.
+- **Validacao:** cada valor tem tipo e faixa (ex. `max_consecutive_failures`
+  inteiro de 1 a 100; um timeout negativo ou "abc" e recusado). Valor invalido
+  volta ao padrao, a interface mostra um aviso e o detalhe vai pro log. Chaves
+  com erro de digitacao tambem sao avisadas.
+- **Arquivo ilegivel** (JSON quebrado): vira `config.json.bak` e o bot segue com
+  os padroes, em vez de falhar.
+- De onde vem cada numero de deteccao/tempo: [docs/calibracao.md](docs/calibracao.md).
+
+Campos:
 
 - `last_window` / `last_dpi_scale` / `last_calibrated_at` — so informativo,
   usado pra decidir quando vale a pena regravar o arquivo (a recalibracao

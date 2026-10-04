@@ -101,18 +101,7 @@ def test_regioes_em_monitor_com_origem_negativa():
     assert validate_regions({"a": Region(-1900, 100, 200, 100)}, bounds) == []
 
 
-# -- config.number ----------------------------------------------------------------------
-
-@pytest.mark.parametrize("section,expected", [
-    ({"x": 7}, 7), ({}, 5), ({"x": "abc"}, 5), ({"x": None}, 5),
-    ({"x": True}, 5), ({"x": -1}, 5), ({"x": 0.5}, 0.5),
-])
-def test_config_number_valida_valores_malucos(section, expected):
-    assert config_store.number(section, "x", 5, minimum=0.0) == expected
-
-
-def test_config_number_secao_invalida():
-    assert config_store.number(None, "x", 5) == 5
+# -- config ---------------------------------------------------------------------------------
 
 
 def test_defaults_tem_secao_safety_e_config_antigo_recebe(tmp_path, monkeypatch):

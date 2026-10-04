@@ -124,6 +124,10 @@ class FishingBotApp:
                                      wraplength=310, justify="left")
         self.error_label.pack(fill="x", padx=10, pady=(6, 0))
 
+        self.notice_label = tk.Label(self.root, text="", font=("Segoe UI", 8), fg="#b26a00",
+                                      wraplength=310, justify="left")
+        self.notice_label.pack(side="bottom", padx=10)
+
         self.panic_label = tk.Label(self.root, text="", font=("Segoe UI", 8), fg="#555555")
         self.panic_label.pack(side="bottom", pady=(0, 8))
 
@@ -217,6 +221,7 @@ class FishingBotApp:
                                  fg="#555555" if (key and enter_ok) else "#c62828")
 
         self.stats_label.config(text=snap["stats_text"])
+        self.notice_label.config(text=snap["config_notice"])
 
         waiting = snap["state"] == AppState.AGUARDANDO_CONFIRMACAO_MANUAL
         self.continue_btn.config(state="normal" if waiting else "disabled")

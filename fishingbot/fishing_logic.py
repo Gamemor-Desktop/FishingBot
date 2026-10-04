@@ -35,7 +35,7 @@ NO_BITE_YET_MESSAGE = (
 
 
 def wait_for_bite(sct: mss.mss, regions: dict, shared: SharedState, dry_run: bool,
-                   timeout_seconds: float, cast_check_seconds: float = 45.0) -> bool:
+                   timeout_seconds: float, cast_check_seconds: float) -> bool:
     """Espera a bolinha da mordida aparecer (forma de disco brilhante, ver
     vision.read_hook), em 2 frames seguidos.
 
@@ -93,7 +93,7 @@ def run_timing_minigame(sct: mss.mss, regions: dict, keybinds: dict, shared: Sha
     hit_min_ratio por `hit_confirm_frames` frames seguidos) e aperta ESPACO."""
     hz = regions["hook_zone"]
     colors = DEFAULT_COLORS["hook_zone"]
-    needed = max(1, int(colors.get("hit_confirm_frames", 2)))
+    needed = max(1, int(colors["hit_confirm_frames"]))
     start = time.monotonic()
     streak = 0
     while time.monotonic() - start < timeout_seconds:
@@ -152,8 +152,8 @@ def classify_pull_state(sct: mss.mss, regions: dict) -> str | None:
 
 def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: SharedState,
                        dry_run: bool, timeout_seconds: float, end_confirm_seconds: float,
-                       first_appear_timeout_seconds: float = 3.0,
-                       min_pull_seconds: float = 0.0) -> CastOutcome:
+                       first_appear_timeout_seconds: float,
+                       min_pull_seconds: float) -> CastOutcome:
     """Fase de puxar. Duas situacoes SAO DIFERENTES e precisam de logica
     diferente:
 
@@ -305,7 +305,7 @@ def do_one_cast(sct: mss.mss, regions: dict, keybinds: dict, timings: dict,
 
     shared.set_state(AppState.AGUARDANDO_MINIGAME, "Aguardando a linha afundar e o peixe beliscar...")
     if not wait_for_bite(sct, regions, shared, dry_run, timings["bite_timeout_seconds"],
-                         timings.get("cast_confirm_seconds", 45.0)):
+                         timings["cast_confirm_seconds"]):
         return failed(CastOutcome.NO_BITE)
 
     shared.set_state(AppState.AUTOMACAO, "Peixe beliscou! Esperando o momento certo pra fisgar...")
@@ -315,9 +315,9 @@ def do_one_cast(sct: mss.mss, regions: dict, keybinds: dict, timings: dict,
     shared.set_state(AppState.AUTOMACAO, "Puxando o peixe...")
     outcome = run_pulling_phase(sct, regions, keybinds, shared, dry_run,
                                  timings["pulling_timeout_seconds"],
-                                 timings.get("end_confirm_seconds", 1.2),
-                                 timings.get("pull_panel_first_appear_timeout_seconds", 6.0),
-                                 timings.get("pull_min_seconds", 8.0))
+                                 timings["end_confirm_seconds"],
+                                 timings["pull_panel_first_appear_timeout_seconds"],
+                                 timings["pull_min_seconds"])
     if outcome is not CastOutcome.CAPTURED:
         return failed(outcome)
 
