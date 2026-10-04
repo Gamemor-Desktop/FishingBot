@@ -1,61 +1,70 @@
 # FishingBot
 
-Versao empacotada como aplicativo Windows (`FishingBot.exe`) do bot de pesca
-do FiveM: detecta a janela do jogo automaticamente, se adapta a resolucao e
-escala do Windows, calibra sozinho e mostra uma interface simples com
-Iniciar/Parar. Baseado na mesma logica de reconhecimento visual do projeto
-`fivem_fishing_bot` (script), mas sem coordenadas fixas.
+Bot de pesca para o **FiveM** (so Windows). Ele reconhece o minigame de pesca
+pela tela e aperta as teclas por voce: detecta a janela do jogo sozinho, se adapta
+a resolucao e a escala do Windows, e tem uma interface simples com INICIAR/PARAR.
+Pode tambem **travar a linha numa profundidade** que voce escolher.
 
-Repositorio: https://github.com/Gamemor-Desktop/FishingBot (privado)
+> ## Leia antes de usar
+>
+> - **Risco de banimento.** Isto e uma macro/automacao. A maioria dos servidores
+>   de FiveM (principalmente os de roleplay, onde pesca costuma estar ligada a
+>   economia do servidor) **proibe macro e pode banir sua conta**. Leia as regras
+>   do seu servidor. Voce usa por sua conta e risco; o bot nao tenta esconder nada
+>   de anti-cheat. Para testar sem apertar nenhuma tecla, rode `FishingBot.exe --dry-run`.
+> - **Foi testado num unico cenario:** uma conta, um servidor, tela **1920x1080**,
+>   com o HUD de pesca que mostra `PESCARIA / AFUNDANDO / LINHA / PROFUNDIDADE /
+>   PEIXE`. Se o HUD do seu servidor for diferente (outras cores, outros textos,
+>   outra posicao), o bot pode nao reconhecer nada. Veja "Limitacoes conhecidas".
+> - **Sem garantia.** Software livre sob licenca MIT (arquivo `LICENSE`).
 
-## Como conseguir o projeto
+## Download (para quem so quer usar)
 
-O `FishingBot.exe` **nao** fica versionado no git (esta no `.gitignore`, ja
-que e um binario gerado e pesado). Pra conseguir o codigo:
+1. Baixe o **`FishingBot.exe`** em
+   [Releases](https://github.com/Gamemor-Desktop/FishingBot/releases/latest). Se quiser
+   conferir o arquivo, o SHA256 esta na pagina da Release (e no `SHA256.txt`):
+   no prompt de comando, `certutil -hashfile FishingBot.exe SHA256`.
+2. **O Windows pode avisar** ("O Windows protegeu o computador" ou um alerta do
+   antivirus). O `.exe` **nao tem assinatura digital** e faz coisas que programas
+   de macro fazem: le a tela, envia teclas e escuta F10/ENTER mesmo com o jogo em
+   foco. Se confiar, clique em **Mais informacoes > Executar assim mesmo**. Se
+   preferir nao confiar em um `.exe` de terceiros, **compile voce mesmo** a partir
+   do codigo (secao "Como compilar").
+3. De dois cliques no `FishingBot.exe`. **Nao precisa instalar Python.**
+
+## Como usar
+
+Antes: abra o FiveM em **janela ou janela sem bordas** (tela cheia exclusiva pode
+impedir a captura de tela), va ate o local de pesca e deixe a vara equipada no
+slot que o bot usa (padrao: tecla **4**; mude em `keybinds` se for outra).
+
+1. Abra o `FishingBot.exe`. A janela mostra "Procurando FiveM..." -> "Detectando
+   janela..." -> "Calibrando..." -> "Aguardando pesca...". Quando o jogo for achado,
+   clique em **INICIAR** e **volte para o jogo** (o FiveM se minimiza sozinho se
+   perder o foco; o bot pausa e retoma quando voce voltar).
+2. O bot lanca a vara, espera a mordida, fisga na hora certa e puxa o peixe
+   alternando as teclas **S** e **W** conforme o painel (`Calmo` / `Puxando forte`).
+3. Quando o peixe e capturado o bot **para** e apita: "Peixe capturado! Pegue e corte
+   o peixe manualmente. Pressione ENTER quando estiver pronto". Essa etapa nao e
+   automatizada: faca-a no jogo e aperte **ENTER** (ou clique em **CONTINUAR**) para
+   o bot lancar a vara de novo. O ENTER so vale nesse momento.
+4. **F10** e a tecla de emergencia: para tudo na hora, mesmo com o jogo em foco.
+   **PARAR** tambem interrompe e solta qualquer tecla segurada.
+5. **Travar a linha numa profundidade (opcional):** marque "Travar a linha em [N] m".
+   O bot aperta **E** (Parar nesta profundidade) quando a profundidade chega em N.
+   Detalhes e limites na secao "Travar a linha numa profundidade".
+
+Se o bot se desligar sozinho (varias falhas seguidas, tela preta, etc.) ele mostra o
+motivo na janela e salva um pacote de diagnostico em
+`%LOCALAPPDATA%\FishingBot\diagnostics\`.
+
+## Como conseguir o codigo
 
 ```bat
 git clone https://github.com/Gamemor-Desktop/FishingBot.git
 ```
 
-Depois, ou compile o `.exe` voce mesmo (secao "Como compilar" abaixo) ou
-rode direto do codigo-fonte com Python. Nao ha releases publicadas com o
-`.exe` pronto no momento -- se precisar distribuir o executavel pra alguem
-que nao vai compilar, gere localmente com `build.bat` e envie o arquivo por
-fora do git.
-
-## Como rodar (usuario final, ja com o .exe pronto)
-
-1. Abra o FiveM (janela ou borderless windowed -- fullscreen exclusivo pode
-   impedir a captura de tela de outros programas).
-2. Dê dois cliques em `FishingBot.exe`.
-3. A janela mostra "Procurando FiveM..." -> "Detectando janela..." ->
-   "Calibrando..." -> "Aguardando pesca...". Quando chegar em "Aguardando
-   pesca...", clique em **INICIAR**.
-4. Va pescar. O bot assume a partir do momento em que voce usa a vara.
-5. Quando o peixe for capturado, o bot **para** e mostra "Peixe capturado!
-   Pegue e corte o peixe manualmente. Pressione ENTER quando estiver pronto
-   para pescar novamente." O bot apita e o botao **CONTINUAR** fica ativo.
-   Essa etapa (pegar o peixe no chao e corta-lo) nao
-   e automatizada -- faca-a normalmente no jogo e, quando terminar, aperte
-   **ENTER** (ou clique em CONTINUAR) pra o bot lançar a vara de novo, depois
-   de uma folga de ~1,5 s. O ENTER so tem efeito nesse
-   momento especifico; apertado em qualquer outra hora (durante o minigame,
-   por exemplo) e ignorado, de proposito, pra nao atrapalhar a automacao.
-6. **F10** (tecla de emergencia) para tudo na hora, mesmo com o jogo em foco.
-   **PARAR** interrompe a automacao e solta qualquer tecla que estivesse
-   sendo segurada, na hora -- inclusive se estiver parado esperando o ENTER
-   da etapa manual.
-
-Nao precisa instalar Python nem nada -- o `.exe` e autocontido.
-
-## Aviso importante
-
-Isto e um bot de automacao/macro para um jogo online multiplayer. A maioria
-dos servidores de FiveM (principalmente os de roleplay, onde pesca costuma
-estar ligada a economia do servidor) proibe macro/automacao nas regras e
-pode banir contas que usarem isso. Leia as regras do seu servidor antes de
-usar. Rode com `FishingBot.exe --dry-run` (veja abaixo) pra testar sem
-apertar nenhuma tecla de verdade.
+Depois compile o `.exe` (secao abaixo) ou rode direto do codigo com Python.
 
 ## Como compilar o .exe (desenvolvedor)
 
@@ -355,6 +364,12 @@ cada limiar de deteccao esta em [docs/calibracao.md](docs/calibracao.md).
 ## Limitacoes conhecidas
 
 - So Windows (usa `pywin32`/DirectInput). Não tem como rodar em outro SO.
+- **O reconhecimento foi calibrado em um unico servidor/HUD e em 1920x1080.** Cores,
+  textos e posicoes do HUD (`PROFUNDIDADE`, `PEIXE`, o painel `Calmo`/`Puxando forte`)
+  vem de capturas desse cenario (`tests/fixtures/`, `docs/calibracao.md`). Em outro
+  servidor ou resolucao o bot pode nao reconhecer o minigame; ele **falha do lado
+  seguro** (nao aperta teclas sem reconhecer a tela), mas pode simplesmente nao
+  funcionar. Pull requests com capturas de outros HUDs sao bem-vindos.
 - As fracoes de `hook_zone` (fase de fisgar) vieram de screenshots
   analisados, nao de uma calibracao 100% ao vivo como a fase de puxar --
   deve funcionar, mas se o ESPACO nunca disparar no momento certo, ajuste
@@ -367,3 +382,7 @@ cada limiar de deteccao esta em [docs/calibracao.md](docs/calibracao.md).
 - Nenhuma tentativa de evadir anti-cheat/deteccao de macro -- e simulacao
   de teclado padrao do Windows (pydirectinput/SendInput), igual ao projeto
   original.
+
+## Licenca
+
+MIT -- veja o arquivo [LICENSE](LICENSE). Sem garantia de qualquer tipo.
