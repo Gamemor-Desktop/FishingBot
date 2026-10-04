@@ -67,7 +67,18 @@ DEFAULTS = {
         # depois de ja ter aparecido) -- sem essa distincao, uma demora
         # normal de renderizacao do jogo (rede/frame) era tratada como
         # "peixe fugiu" antes mesmo do painel ter chance de aparecer.
-        "pull_panel_first_appear_timeout_seconds": 3.0,
+        #
+        # Subido de 3.0 pra 6.0 em 15/09/2026: confirmado com screenshots de
+        # debug de sessoes reais que, logo apos o ESPACO, o jogo mostra por
+        # um tempo um aviso "X Parar de pescar" na MESMA regiao onde depois
+        # aparece "Calmo"/"Puxando forte" -- e esse aviso as vezes fica na
+        # tela por mais de 3s antes de trocar pro painel de verdade (numa
+        # sessao levou ~1s, mas em outra ainda estava so com o aviso "Parar
+        # de pescar" quando o timeout de 3s estourou). Com 3.0s o bot
+        # desistia do lance (achando que o painel "nunca apareceu") mesmo
+        # com o peixe ja fisgado de verdade, so por causa dessa demora de
+        # transicao entre os dois avisos.
+        "pull_panel_first_appear_timeout_seconds": 6.0,
     },
     "fractions_override": {},
     "ui": {"start_minimized": False},

@@ -56,7 +56,18 @@ DEFAULT_COLORS = {
         "lower": [0, 120, 150],
         "upper": [15, 255, 255],
         "bite_min_ratio": 0.0045,
-        "hit_min_ratio": 0.014,
+        # Subido de 0.014 pra 0.018 em 15/09/2026: log + screenshots de uma
+        # sessao real mostraram 4 ESPACOs disparados com ratio 0.0141-0.0146
+        # (mal cruzando o limite antigo) que NUNCA fisgaram o peixe (painel de
+        # puxar nunca apareceu, 6s perdidos cada vez) -- a mascara desses
+        # frames (hook_zone_013035_mask.png) so tinha ruido espalhado pela
+        # roupa do personagem (hoodie listrado, cores batem com a faixa
+        # vermelho-laranja configurada), sem a bolinha vermelha real da
+        # fisgada. Nos casos que fisgaram de verdade o ratio veio 0.022-0.029
+        # (bolinha real soma area solida em cima do mesmo ruido de fundo).
+        # 0.018 fica acima do teto do ruido da roupa e abaixo do piso dos
+        # acertos reais observados.
+        "hit_min_ratio": 0.018,
     },
     # "Calmo": recalibrado com base em screenshot real da caixa em estado
     # calmo (14/09/2026) -- a caixa NAO e cinza neutro, e um azul-marinho
@@ -64,14 +75,48 @@ DEFAULT_COLORS = {
     # borda RGB~(26..27, 46..47, 71..72) -> H~106, S~160). O range antigo
     # (S ate 60) cortava fora praticamente toda a caixa real (S real ~90-162),
     # por isso so batia ~1% da area em vez da caixa inteira.
-    "pulling_gray": {"lower": [95, 50, 15], "upper": [120, 200, 100]},
+    #
+    # V e S apertados de novo em 15/09/2026, com base em screenshots de
+    # debug de uma sessao real: depois que a caixa "Calmo" some de vez (peixe
+    # ja fora d'agua), a regiao capturada fica so com o FUNDO azul-marinho
+    # escuro do jogo por tras -- e esse fundo (V~51-68, S~145-223) batia
+    # TAMBEM com o range antigo (V ate 100, S ate 200), dando ratio=1.0 igual
+    # a caixa de verdade. Resultado: o bot nunca via a leitura cair abaixo do
+    # limiar depois que o peixe saia da agua, e ficava segurando a tecla
+    # (pull_key) por dezenas de segundos (visto num log real: 49s seguidos)
+    # ate estourar timeout. A caixa real tem V mediano ~33 (bem mais escura
+    # que o fundo, que fica ~51-68) e S mediano ~116 (mais baixo que o fundo,
+    # ~145-223) -- por isso apertar V<=48 e S<=140 corta o fundo fora mas
+    # ainda cobre ~88% da caixa real (testado contra os screenshots dessa
+    # sessao, bem acima do min_ratio=0.3 usado em classify_pull_state).
+    "pulling_gray": {"lower": [95, 50, 15], "upper": [120, 140, 48]},
     # "Puxando forte": recalibrado com base em pixels reais da caixa (fundo
     # marrom-avermelhado escuro RGB~(31..85, 25..41, 34..44), borda
     # RGB~(145..158, 54..58, 47..51)). No HSV de 0-179 graus do OpenCV essa
     # cor cai perto de H=135-179 (vermelho "escuro"/vinho, do lado que faz
     # wrap com H=0), bem longe da faixa antiga (H=0-25, vermelho-laranja
     # vivo) -- por isso o range antigo nunca batia com a caixa de verdade.
-    "pulling_red": {"lower": [135, 35, 20], "upper": [179, 200, 150]},
+    #
+    # 15/09/2026: descoberto (com screenshots de debug de uma sessao real)
+    # que a MESMA caixa "Puxando forte" pode renderizar com H perto de 0
+    # (media ~8, visto numa sessao com luz ambiente do jogo mais clara/
+    # quente) em vez de perto de 179 (media ~161, sessao anterior, luz mais
+    # escura) -- e o range de cima (H 135-179) so cobre um dos dois lados.
+    # Resultado: com H~8 o ratio ficava 0.0 o tempo todo, o painel de puxar
+    # "nunca aparecia" (aviso as 3.0s) mesmo com a caixa visivel na tela, e o
+    # bot desistia do lance sem nunca ter puxado nada. Como H e circular
+    # (0 e 179 sao vizinhos), a correcao e cobrir os dois lados do wrap com
+    # duas faixas em vez de uma so -- ver "ranges" abaixo e
+    # vision.hsv_mask_multi. Validado contra 4 screenshots reais de
+    # "Puxando forte" (2 de cada sessao/iluminacao): ratio 0.77-0.92 nos
+    # dois casos, sem gerar falso positivo nos screenshots de fundo vazio/
+    # outros paineis dessas mesmas sessoes.
+    "pulling_red": {
+        "ranges": [
+            ([135, 35, 20], [179, 200, 150]),
+            ([0, 30, 70], [15, 200, 255]),
+        ],
+    },
 }
 
 

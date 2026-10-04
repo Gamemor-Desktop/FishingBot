@@ -39,6 +39,20 @@ def hsv_mask(frame_bgr: np.ndarray, lower: list[int], upper: list[int]) -> np.nd
     return cv2.inRange(hsv, lower_np, upper_np)
 
 
+def hsv_mask_multi(frame_bgr: np.ndarray, ranges: list[tuple[list[int], list[int]]]) -> np.ndarray:
+    """Como hsv_mask, mas combina (OR) varias faixas de HSV numa mascara so.
+    Necessario pra cores cujo matiz (Hue) fica perto do "wrap" 0/179 do
+    OpenCV (ex: vermelho) -- dependendo da luz ambiente do jogo, a MESMA cor
+    pode cair um pouco pra um lado (H perto de 0) ou pro outro (H perto de
+    179), e uma unica faixa nao-circular so cobre um dos dois lados."""
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    for lower, upper in ranges:
+        mask = cv2.bitwise_or(mask, cv2.inRange(hsv, np.array(lower, dtype=np.uint8),
+                                                  np.array(upper, dtype=np.uint8)))
+    return mask
+
+
 def pixel_ratio(mask: np.ndarray) -> float:
     if mask.size == 0:
         return 0.0

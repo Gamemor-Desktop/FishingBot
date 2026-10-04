@@ -76,7 +76,7 @@ def classify_pull_state(sct: mss.mss, regions: dict) -> str | None:
     gray = DEFAULT_COLORS["pulling_gray"]
     red = DEFAULT_COLORS["pulling_red"]
     gray_mask = vision.hsv_mask(frame, gray["lower"], gray["upper"])
-    red_mask = vision.hsv_mask(frame, red["lower"], red["upper"])
+    red_mask = vision.hsv_mask_multi(frame, red["ranges"])
     gray_ratio = vision.pixel_ratio(gray_mask)
     red_ratio = vision.pixel_ratio(red_mask)
     min_ratio = 0.3
@@ -92,7 +92,7 @@ def classify_pull_state(sct: mss.mss, regions: dict) -> str | None:
 
 def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: SharedState,
                        dry_run: bool, timeout_seconds: float, end_confirm_seconds: float,
-                       first_appear_timeout_seconds: float = 3.0) -> None:
+                       first_appear_timeout_seconds: float = 3.0) -> bool:
     """Fase de puxar. Duas situacoes SAO DIFERENTES e precisam de logica
     diferente:
 
@@ -139,14 +139,30 @@ def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: Share
     try:
         while time.time() - start < timeout_seconds:
             if shared.should_stop_cycle():
-                return
+                return False
 
             state = classify_pull_state(sct, regions)
             shared.update(fish_state_text={"gray": "Calmo", "red": "Puxando forte", None: "-"}[state])
 
+            if state == last_state:
+                stable_count += 1
+            else:
+                stable_count = 0
+                last_state = state
+            confirmed = stable_count >= debounce_needed
+
             if state is not None:
                 panel_seen = True
-                none_since = None
+                # So cancela a contagem de "painel sumiu" com uma leitura
+                # CONFIRMADA (debounced) do painel de volta. Um unico frame
+                # de flicker (ex: animacao de fade-out do painel batendo por
+                # coincidencia com a cor configurada por 1 frame isolado)
+                # nao deve reiniciar o relogio -- isso era o que deixava a
+                # tecla (W/S) presa bem alem da hora depois do peixe ja ter
+                # saido da agua, porque cada flicker reiniciava o
+                # end_confirm_seconds do zero.
+                if confirmed:
+                    none_since = None
             elif not panel_seen:
                 if time.time() - start >= first_appear_timeout_seconds:
                     log.warning(
@@ -155,22 +171,16 @@ def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: Share
                         f"provavelmente nao batem com este jogo/tela. Rode com --debug pra ver as "
                         f"proporcoes de cor e as screenshots da regiao capturada."
                     )
-                    return
+                    return False
             else:
                 if none_since is None:
                     none_since = time.time()
                 elif time.time() - none_since >= end_confirm_seconds:
                     log.info(f"Painel de pesca sumiu (ausente por {end_confirm_seconds:.2f}s "
                              f"seguidos) -> peixe capturado/perdido")
-                    return
+                    return True
 
-            if state == last_state:
-                stable_count += 1
-            else:
-                stable_count = 0
-                last_state = state
-
-            if stable_count >= debounce_needed and state is not None:
+            if confirmed and state is not None:
                 target_key = keybinds["pull_key"] if state == "gray" else keybinds["release_key"]
                 if stable_count == debounce_needed:
                     log.info(f"Estado='{state}' -> segurando '{target_key}'"
@@ -182,6 +192,7 @@ def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: Share
 
         log.warning("Timeout na fase de puxar o peixe"
                      + ("" if panel_seen else " (painel nunca chegou a aparecer)"))
+        return False
     finally:
         if not dry_run:
             input_sim.release_all()
@@ -227,10 +238,11 @@ def do_one_cast(sct: mss.mss, regions: dict, keybinds: dict, timings: dict,
         return False
 
     shared.set_state(AppState.AUTOMACAO, "Puxando o peixe...")
-    run_pulling_phase(sct, regions, keybinds, shared, dry_run,
-                       timings["pulling_timeout_seconds"],
-                       timings.get("end_confirm_seconds", 1.2),
-                       timings.get("pull_panel_first_appear_timeout_seconds", 3.0))
+    if not run_pulling_phase(sct, regions, keybinds, shared, dry_run,
+                              timings["pulling_timeout_seconds"],
+                              timings.get("end_confirm_seconds", 1.2),
+                              timings.get("pull_panel_first_appear_timeout_seconds", 3.0)):
+        return False
 
     shared.update(casts_done=shared.casts_done + 1, fish_state_text="-", distance_text="-")
     shared.set_state(AppState.CAPTURA_CONCLUIDA)

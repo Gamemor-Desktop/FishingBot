@@ -36,12 +36,31 @@ _last_event: dict[str, float] = {}
 
 SAVE_INTERVAL_SECONDS = 1.0
 LOG_INTERVAL_SECONDS = 0.25
+MAX_AGE_DAYS = 7
+
+
+def _cleanup_old_files() -> None:
+    """Apaga PNGs de debug com mais de MAX_AGE_DAYS. Os nomes de arquivo so
+    tem HHMMSS (sem data), entao sessoes de --debug em dias diferentes nunca
+    se sobrescreveriam sozinhas -- sem isso a pasta cresce pra sempre."""
+    cutoff = time.time() - MAX_AGE_DAYS * 86400
+    removed = 0
+    for png in debug_dir().glob("*.png"):
+        try:
+            if png.stat().st_mtime < cutoff:
+                png.unlink()
+                removed += 1
+        except OSError:
+            pass
+    if removed:
+        log.info(f"[debug] {removed} screenshot(s) com mais de {MAX_AGE_DAYS} dias removidos de {debug_dir()}")
 
 
 def enable() -> None:
     global _enabled
     _enabled = True
     debug_dir().mkdir(parents=True, exist_ok=True)
+    _cleanup_old_files()
     log.info(f"Modo debug ativado -- screenshots e proporcoes de cor em {debug_dir()}")
 
 
