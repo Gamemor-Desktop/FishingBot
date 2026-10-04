@@ -6,10 +6,11 @@ os botoes Iniciar/Parar; toda a logica pesada roda na thread do Controller.
 from __future__ import annotations
 
 import logging
+import sys
 import tkinter as tk
 from tkinter import ttk
 
-from . import panic
+from . import manual_control, panic
 from .app_state import AppState, SharedState
 from .controller import Controller
 
@@ -42,9 +43,10 @@ class FishingBotApp:
         self.root = root
         self.shared = SharedState()
         self.controller = Controller(self.shared, dry_run=dry_run)
+        self._last_state: AppState | None = None
 
         root.title("FishingBot")
-        root.geometry("340x430")
+        root.geometry("340x520")
         root.resizable(False, False)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         # excecao dentro de um callback do Tk: loga o traceback (por padrao
@@ -95,6 +97,10 @@ class FishingBotApp:
         self.casts_label = tk.Label(self.root, text="Peixes capturados: 0", font=("Segoe UI", 9))
         self.casts_label.pack(fill="x", padx=10, pady=(4, 0))
 
+        self.stats_label = tk.Label(self.root, text="", font=("Segoe UI", 9), fg="#555555",
+                                     wraplength=310, justify="left")
+        self.stats_label.pack(fill="x", padx=10)
+
         btn_frame = tk.Frame(self.root)
         btn_frame.pack(pady=16)
 
@@ -105,6 +111,14 @@ class FishingBotApp:
         self.stop_btn = tk.Button(btn_frame, text="PARAR", width=14, bg="#c62828", fg="white",
                                    font=("Segoe UI", 10, "bold"), command=self._on_stop)
         self.stop_btn.grid(row=0, column=1, padx=6)
+
+        # Alternativa ao ENTER na etapa manual (o hook global pode nao
+        # funcionar, ex: jogo como administrador). So habilita enquanto o
+        # bot espera a confirmacao.
+        self.continue_btn = tk.Button(btn_frame, text="CONTINUAR (ou ENTER)", width=30,
+                                       bg="#e65100", fg="white", font=("Segoe UI", 10, "bold"),
+                                       command=self._on_continue, state="disabled")
+        self.continue_btn.grid(row=1, column=0, columnspan=2, pady=(8, 0))
 
         self.error_label = tk.Label(self.root, text="", font=("Segoe UI", 9), fg="#c62828",
                                      wraplength=310, justify="left")
@@ -125,12 +139,25 @@ class FishingBotApp:
         self.shared.update(user_wants_running=False)
         self._set_buttons_state(running=False)
 
+    def _on_continue(self) -> None:
+        manual_control.confirm()
+
     def _on_close(self) -> None:
         # espera a thread do controlador soltar as teclas antes de fechar
         # (ela e daemon: sem isso, fechar no meio de uma puxada podia deixar
         # S/W apertadas)
         self.controller.shutdown(timeout=2.0)
         self.root.destroy()
+
+    @staticmethod
+    def _beep() -> None:
+        if sys.platform != "win32":
+            return
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+        except Exception:
+            pass
 
     def _on_tk_exception(self, exc_type, exc, tb) -> None:
         log.error("Excecao no callback da interface", exc_info=(exc_type, exc, tb))
@@ -179,10 +206,19 @@ class FishingBotApp:
         self.error_label.config(text=snap["error_message"])
 
         key = panic.active_key()
-        self.panic_label.config(
-            text=f"Parada de emergencia: {key.upper()}" if key
-            else "Tecla de emergencia INDISPONIVEL -- use o botao PARAR",
-            fg="#555555" if key else "#c62828")
+        enter_ok = manual_control.hook_active()
+        hints = [f"Emergencia: {key.upper()}" if key else "Emergencia: INDISPONIVEL (use PARAR)",
+                 "ENTER: ativo" if enter_ok else "ENTER: indisponivel (use CONTINUAR)"]
+        self.panic_label.config(text="   |   ".join(hints),
+                                 fg="#555555" if (key and enter_ok) else "#c62828")
+
+        self.stats_label.config(text=snap["stats_text"])
+
+        waiting = snap["state"] == AppState.AGUARDANDO_CONFIRMACAO_MANUAL
+        self.continue_btn.config(state="normal" if waiting else "disabled")
+        if waiting and self._last_state != AppState.AGUARDANDO_CONFIRMACAO_MANUAL:
+            self._beep()  # chama atencao: o bot esta parado esperando voce
+        self._last_state = snap["state"]
 
         # mantem os botoes coerentes mesmo se o estado mudar por outro
         # motivo (ex: FiveM fechou e o controller nao alterou user_wants_running)

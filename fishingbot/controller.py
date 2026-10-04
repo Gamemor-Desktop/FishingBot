@@ -36,6 +36,15 @@ Seguranca (nada disso depende do ciclo de pesca "se comportar"):
       thread em silencio.
     - Tecla de panico global (panic.py) e shutdown() soltam tudo.
 
+Anti-falha (repetir o mesmo erro por horas so atrapalha):
+    - Cada lance termina com um CastOutcome (stats.py) e a sessao conta
+      quantos de cada tipo; falhas pedem uma espera crescente (backoff).
+    - Disjuntor: N falhas seguidas (safety.max_consecutive_failures) desligam
+      o bot e salvam um pacote de diagnostico (diagnostics.py).
+    - Monitor de saude (thread propria): tela preta, imagem congelada ou
+      nenhum progresso por muito tempo tambem desligam o bot com mensagem.
+    - Antes de pescar, as regioes de captura sao validadas contra a tela.
+
 Sobre o estado CALIBRANDO: so aparece (e so regrava o config.json) quando a
 janela encontrada e DIFERENTE da ultima calibracao salva em
 %LOCALAPPDATA%/FishingBot/config.json (posicao/tamanho/DPI). Se for a mesma
@@ -55,11 +64,14 @@ import threading
 import time
 
 import mss
+from mss.exception import ScreenShotError
 
-from . import config_store, fishing_logic, input_sim, manual_control, panic
+from . import (capture_health, config_store, diagnostics, fishing_logic, input_sim,
+               manual_control, panic)
 from .app_state import ERRO_STATUS_TEXT, AppState, SharedState
 from .input_sim import FocusLostError
 from .regions import compute_all_regions
+from .stats import OUTCOME_LABELS, CastOutcome, SessionStats
 from .window_detect import (
     WindowInfo,
     bring_to_foreground,
@@ -131,10 +143,81 @@ class _WindowWatchdog:
                 return
 
 
+class _HealthMonitor:
+    """Thread que, enquanto a automacao roda, vigia o que o ciclo de pesca
+    nao enxerga sozinho: (1) a captura de tela ficar preta ou congelada, e
+    (2) ficar muito tempo sem progresso (nenhuma captura/retomada). Em
+    qualquer um dos casos salva um pacote de diagnostico e PARA o bot
+    (shared.fail). Usa o proprio mss: instancias do mss nao sao thread-safe."""
+
+    def __init__(self, shared: SharedState, window: WindowInfo, regions: dict, cfg: dict,
+                 interval: float = 1.0):
+        safety = cfg.get("safety", {})
+        self._shared = shared
+        self._window = window
+        self._regions = regions
+        self._cfg = cfg
+        self._interval = interval
+        self._progress_limit = config_store.number(safety, "progress_timeout_minutes", 15, 0.5) * 60
+        self._capture = capture_health.CaptureMonitor(
+            black_seconds=config_store.number(safety, "black_screen_seconds", 3.0, 0.5),
+            frozen_seconds=config_store.number(safety, "frozen_screen_seconds", 15.0, 1.0),
+        )
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, name="FishingBotHealth", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
+    def evaluate(self, snap: dict, thumb, now: float) -> str | None:
+        """Decide se algo esta errado (None = tudo certo). Separado do loop
+        pra ser testavel sem thread, tela ou relogio de verdade."""
+        if snap["state"] == AppState.AGUARDANDO_CONFIRMACAO_MANUAL:
+            # esperando o jogador pegar/cortar o peixe: nao e travamento
+            self._capture.reset()
+            self._shared.mark_progress()
+            return None
+        msg = self._capture.update(thumb, now)
+        if msg:
+            return msg
+        idle = time.monotonic() - snap["last_progress_at"]
+        if snap["last_progress_at"] and idle > self._progress_limit:
+            return (f"Nenhum progresso ha {idle / 60:.0f} min (nenhum peixe capturado). "
+                    f"Veja a pasta de diagnostico.")
+        return None
+
+    def _loop(self) -> None:
+        w = self._window
+        try:
+            with mss.mss() as sct:
+                while not self._stop.wait(self._interval):
+                    try:
+                        thumb = capture_health.grab_thumbnail(sct, w.left, w.top, w.width, w.height)
+                    except ScreenShotError:
+                        log.warning("Monitor de saude: falha ao capturar a tela (ignorada)")
+                        continue
+                    snap = self._shared.snapshot()
+                    reason = self.evaluate(snap, thumb, time.monotonic())
+                    if reason:
+                        log.error(f"Monitor de saude: {reason}")
+                        diagnostics.save_bundle(reason, sct, w, self._regions,
+                                                snap["stats_text"], self._cfg)
+                        self._shared.fail(reason)
+                        return
+        except Exception:
+            log.exception("Falha no monitor de saude (bot segue sem ele)")
+
+
 class Controller:
     def __init__(self, shared: SharedState, dry_run: bool = False):
         self.shared = shared
         self.dry_run = dry_run
+        self.stats = SessionStats()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self.cfg = config_store.load_config()
@@ -318,6 +401,46 @@ class Controller:
             time.sleep(0.25)
         return False
 
+    def _sleep(self, seconds: float) -> None:
+        """Dorme `seconds` mas acorda cedo se mandarem parar/abortar."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end and not self.shared.should_stop_cycle():
+            time.sleep(min(0.1, max(0.0, end - time.monotonic())))
+
+    def _backoff_seconds(self) -> float:
+        safety = self.cfg.get("safety", {})
+        base = config_store.number(safety, "retry_backoff_base_seconds", 0.5, 0.0)
+        cap = config_store.number(safety, "retry_backoff_max_seconds", 5.0, 0.0)
+        return min(base * (2 ** max(0, self.stats.consecutive_failures - 1)), cap)
+
+    def _handle_outcome(self, outcome: CastOutcome, sct, window: WindowInfo, regions: dict) -> bool:
+        """Registra o resultado do lance. Retorna False se o disjuntor
+        desarmou (o bot foi parado e o laco de automacao deve sair)."""
+        if outcome is CastOutcome.STOPPED:
+            return True
+        self.stats.record(outcome)
+        summary = self.stats.summary()
+        self.shared.update(stats_text=summary)
+        log.info(f"Lance #{self.stats.attempts}: {OUTCOME_LABELS[outcome]} | {summary}")
+
+        if outcome is CastOutcome.CAPTURED:
+            self.shared.mark_progress()
+            return True
+
+        limit = int(config_store.number(self.cfg.get("safety", {}), "max_consecutive_failures", 5, 1))
+        if self.stats.consecutive_failures >= limit:
+            reason = (f"{self.stats.consecutive_failures} lances seguidos falharam "
+                      f"({self.stats.breakdown()}). A deteccao parece desalinhada com o jogo.")
+            log.error(f"DISJUNTOR: {reason}")
+            folder = diagnostics.save_bundle(reason, sct, window, regions, summary, self.cfg)
+            where = f" Pacote de diagnostico: {folder}" if folder else ""
+            self.shared.fail(f"{reason}{where}")
+            self.stats.consecutive_failures = 0  # um novo INICIAR recomeca a contagem
+            return False
+
+        self._sleep(self._backoff_seconds())
+        return True
+
     def _automation_loop(self, window: WindowInfo, regions: dict, keybinds: dict, timings: dict) -> None:
         """Roda ciclos de pesca ate a janela sumir/mudar ou o usuario parar."""
         shared = self.shared
@@ -331,41 +454,64 @@ class Controller:
             input_sim.set_focus_guard(lambda: is_foreground(window.hwnd))
 
         watchdog = _WindowWatchdog(shared, window)
-        watchdog.start()
+        health = _HealthMonitor(shared, window, regions, self.cfg)
+        sct = mss.mss()
         try:
-            with mss.mss() as sct:
-                while not self._stop_event.is_set() and shared.user_wants_running:
-                    if shared.should_stop_cycle():
-                        return  # watchdog pediu aborto (janela sumiu/mudou)
+            problems = capture_health.validate_regions(regions, sct.monitors[0])
+            if problems:
+                msg = "; ".join(problems)
+                log.error(f"Regioes invalidas: {msg}")
+                shared.fail(f"Regioes de captura fora da tela ({msg}). "
+                            f"A janela do FiveM esta parcialmente fora do monitor?")
+                return
 
-                    shared.set_state(AppState.AGUARDANDO_MINIGAME)
-                    completed = fishing_logic.do_one_cast(sct, regions, keybinds, timings, shared,
-                                                            self.dry_run, hwnd=window.hwnd)
+            shared.mark_progress()
+            watchdog.start()
+            health.start()
+            while not self._stop_event.is_set() and shared.user_wants_running:
+                if shared.should_stop_cycle():
+                    return  # watchdog/monitor pediu aborto (janela mudou, tela preta...)
 
-                    if shared.should_stop_cycle():
+                shared.set_state(AppState.AGUARDANDO_MINIGAME)
+                try:
+                    outcome = fishing_logic.do_one_cast(sct, regions, keybinds, timings, shared,
+                                                          self.dry_run, hwnd=window.hwnd)
+                except ScreenShotError as exc:
+                    log.error(f"Falha na captura de tela: {exc}")
+                    outcome = CastOutcome.CAPTURE_ERROR
+                    sct.close()
+                    sct = mss.mss()  # monitor/driver de video pode ter mudado
+
+                if shared.should_stop_cycle():
+                    return
+
+                if not self._handle_outcome(outcome, sct, window, regions):
+                    return
+
+                if outcome is CastOutcome.CAPTURED:
+                    time.sleep(0.8)  # deixa o texto "Peixe capturado!" visivel um instante
+
+                    # Etapa manual (nao automatizada por enquanto): o
+                    # jogador precisa pegar o peixe no chao e corta-lo/
+                    # processa-lo antes de estar pronto pra uma nova
+                    # pescaria. O bot NAO inicia sozinho aqui -- fica
+                    # parado ate o jogador apertar ENTER (ou clicar em
+                    # CONTINUAR; o ENTER e ignorado em qualquer outro
+                    # estado, ver manual_control.py).
+                    shared.set_state(AppState.AGUARDANDO_CONFIRMACAO_MANUAL)
+                    log.info("Peixe capturado -- aguardando o jogador pegar/cortar o peixe "
+                             "e apertar ENTER pra continuar.")
+
+                    confirmed = manual_control.wait_for_confirmation(shared.should_stop_cycle)
+                    if not confirmed:
                         return
-
-                    if completed:
-                        time.sleep(0.8)  # deixa o texto "Peixe capturado!" visivel um instante
-
-                        # Etapa manual (nao automatizada por enquanto): o
-                        # jogador precisa pegar o peixe no chao e corta-lo/
-                        # processa-lo antes de estar pronto pra uma nova
-                        # pescaria. O bot NAO inicia sozinho aqui -- fica
-                        # parado ate o jogador apertar ENTER (o unico gatilho
-                        # de teclado usado pelo usuario; ignorado em qualquer
-                        # outro estado, ver manual_control.py).
-                        shared.set_state(AppState.AGUARDANDO_CONFIRMACAO_MANUAL)
-                        log.info("Peixe capturado -- aguardando o jogador pegar/cortar o peixe "
-                                 "e apertar ENTER pra continuar.")
-
-                        confirmed = manual_control.wait_for_confirmation(shared.should_stop_cycle)
-                        if not confirmed:
-                            return
-                        log.info("ENTER recebido -> retomando automacao pra proxima pescaria.")
-                    else:
-                        time.sleep(0.5)
+                    log.info("Confirmacao recebida -> retomando automacao pra proxima pescaria.")
+                    shared.mark_progress()
+                    # o personagem ainda pode estar na animacao de cortar o peixe
+                    self._sleep(config_store.number(timings, "after_confirm_delay_seconds", 1.5, 0.0))
         finally:
+            health.stop()
             watchdog.stop()
             input_sim.set_focus_guard(None)
             input_sim.release_all()
+            sct.close()

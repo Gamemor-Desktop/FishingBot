@@ -52,22 +52,34 @@ DEFAULT_FRACTIONS = {
 
 # Cores HSV sao independentes de resolucao -- nao precisam de fracao.
 DEFAULT_COLORS = {
+    # Fisgada. Antes era so "proporcao de pixels vermelho-laranja" com limiar
+    # absoluto, mas a roupa do personagem (hoodie listrado) tem as mesmas cores
+    # e gera 0.005-0.023 de ruido -- MAIOR que a propria bolinha (~0.0057) --,
+    # entao a mordida "era detectada" por coincidencia e o ESPACO disparava sem
+    # peixe (visto em log real). Medido em 123 capturas reais (--debug,
+    # 03/10/2026): 4 tem a bolinha, 119 nao.
+    #   - bolinha/peixe: BRILHANTES (V ~ 221-231); roupa: V <= 173.
+    #   - bolinha: disco compacto 14x14 (area ~155-165, preenchimento >= 0.79).
+    #     Roupa: manchas finas/irregulares (preenchimento <= 0.65).
+    # Por isso: V >= 200 na mascara + checagem de forma da bolinha. Nas 123
+    # capturas isso acha 4/4 bolinhas e 0/119 falsos; ruido restante <= 0.001
+    # de proporcao, contra 0.0054 (so bolinha) e 0.0255 (bolinha + peixe).
     "hook_zone": {
-        "lower": [0, 120, 150],
+        "lower": [0, 120, 200],
         "upper": [15, 255, 255],
-        "bite_min_ratio": 0.0045,
-        # Subido de 0.014 pra 0.018 em 15/09/2026: log + screenshots de uma
-        # sessao real mostraram 4 ESPACOs disparados com ratio 0.0141-0.0146
-        # (mal cruzando o limite antigo) que NUNCA fisgaram o peixe (painel de
-        # puxar nunca apareceu, 6s perdidos cada vez) -- a mascara desses
-        # frames (hook_zone_013035_mask.png) so tinha ruido espalhado pela
-        # roupa do personagem (hoodie listrado, cores batem com a faixa
-        # vermelho-laranja configurada), sem a bolinha vermelha real da
-        # fisgada. Nos casos que fisgaram de verdade o ratio veio 0.022-0.029
-        # (bolinha real soma area solida em cima do mesmo ruido de fundo).
-        # 0.018 fica acima do teto do ruido da roupa e abaixo do piso dos
-        # acertos reais observados.
-        "hit_min_ratio": 0.018,
+        # bolinha = componente conexo com area em [min, max] px (na resolucao
+        # de referencia 1920x1080 -- escala com a janela), quase quadrado e
+        # bem preenchido
+        "ball_min_area": 80,
+        "ball_max_area": 300,
+        "ball_aspect_min": 0.75,
+        "ball_aspect_max": 1.33,
+        "ball_min_fill": 0.70,
+        # proporcao de pixels brilhantes quando o peixe vermelho alinha com a
+        # bolinha (so bolinha ~0.0054; bolinha + peixe ~0.0255)
+        "hit_min_ratio": 0.014,
+        # frames CONSECUTIVOS acima de hit_min_ratio antes de apertar ESPACO
+        "hit_confirm_frames": 2,
     },
     # "Calmo": recalibrado com base em screenshot real da caixa em estado
     # calmo (14/09/2026) -- a caixa NAO e cinza neutro, e um azul-marinho

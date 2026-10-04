@@ -82,10 +82,41 @@ DEFAULTS = {
         # com o peixe ja fisgado de verdade, so por causa dessa demora de
         # transicao entre os dois avisos.
         "pull_panel_first_appear_timeout_seconds": 6.0,
+        # folga entre apertar ENTER (terminou de pegar/cortar o peixe) e o
+        # bot apertar a tecla de usar a vara: o personagem ainda pode estar
+        # na animacao de cortar quando o ENTER chega
+        "after_confirm_delay_seconds": 1.5,
+    },
+    # Anti-falha (ver controller.py / capture_health.py)
+    "safety": {
+        # N falhas de lance SEGUIDAS (sem nenhuma captura no meio) desligam o
+        # bot e salvam um pacote de diagnostico -- repetir o mesmo erro por
+        # horas so atrapalha. O normal de uma pesca sem sorte e falhar 1-2x.
+        "max_consecutive_failures": 5,
+        # sem NENHUM progresso (captura/retomada) por tanto tempo, o bot para.
+        # A espera pelo ENTER da etapa manual nao conta.
+        "progress_timeout_minutes": 15,
+        # espera entre lances que falharam: base * 2^(falhas seguidas - 1),
+        # limitada a max
+        "retry_backoff_base_seconds": 0.5,
+        "retry_backoff_max_seconds": 5.0,
+        # tela totalmente preta / imagem identica por tanto tempo = erro
+        "black_screen_seconds": 3.0,
+        "frozen_screen_seconds": 15.0,
     },
     "fractions_override": {},
     "ui": {"start_minimized": False},
 }
+
+
+def number(section: dict, key: str, default: float, minimum: float = 0.0) -> float:
+    """Le um numero de uma secao do config; valor ausente, de tipo errado ou
+    abaixo do minimo cai no default (um config editado a mao nunca deve
+    derrubar o bot nem criar um loop sem espera)."""
+    value = section.get(key, default) if isinstance(section, dict) else default
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < minimum:
+        return default
+    return value
 
 
 def load_config() -> dict:

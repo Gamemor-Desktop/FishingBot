@@ -16,31 +16,32 @@ import mss
 from . import debug_tools, input_sim, vision, window_detect
 from .app_state import AppState, SharedState
 from .regions import DEFAULT_COLORS, Region
+from .stats import CastOutcome
 
 log = logging.getLogger("fishingbot")
 
 
-def _hook_zone_ratio(sct: mss.mss, roi: Region) -> float:
+def _read_hook(sct: mss.mss, roi: Region) -> vision.HookReading:
     frame = vision.grab(sct, roi.as_roi())
-    colors = DEFAULT_COLORS["hook_zone"]
-    mask = vision.hsv_mask(frame, colors["lower"], colors["upper"])
-    ratio = vision.pixel_ratio(mask)
-    debug_tools.save_roi("hook_zone", frame, mask)
-    return ratio
+    reading = vision.read_hook(frame, DEFAULT_COLORS["hook_zone"])
+    debug_tools.save_roi("hook_zone", frame, reading.mask)
+    return reading
 
 
 def wait_for_bite(sct: mss.mss, regions: dict, shared: SharedState, dry_run: bool,
                    timeout_seconds: float) -> bool:
+    """Espera a bolinha da mordida aparecer (forma de disco brilhante, ver
+    vision.read_hook), em 2 frames seguidos."""
     hz = regions["hook_zone"]
-    colors = DEFAULT_COLORS["hook_zone"]
-    start = time.time()
+    start = time.monotonic()
     confirm = 0
-    while time.time() - start < timeout_seconds:
+    while time.monotonic() - start < timeout_seconds:
         if shared.should_stop_cycle():
             return False
-        ratio = _hook_zone_ratio(sct, hz)
-        debug_tools.log_ratio("hook_zone_bite", ratio, colors["bite_min_ratio"])
-        if ratio >= colors["bite_min_ratio"]:
+        reading = _read_hook(sct, hz)
+        debug_tools.log_ratio("hook_zone_bite", reading.bright_ratio, None,
+                               extra=f"bolinha={'SIM' if reading.ball else 'nao'}")
+        if reading.ball:
             confirm += 1
             if confirm >= 2:
                 return True
@@ -52,16 +53,21 @@ def wait_for_bite(sct: mss.mss, regions: dict, shared: SharedState, dry_run: boo
 
 def run_timing_minigame(sct: mss.mss, regions: dict, keybinds: dict, shared: SharedState,
                          dry_run: bool, timeout_seconds: float) -> bool:
+    """Espera o peixe vermelho alinhar (proporcao de pixels brilhantes acima de
+    hit_min_ratio por `hit_confirm_frames` frames seguidos) e aperta ESPACO."""
     hz = regions["hook_zone"]
     colors = DEFAULT_COLORS["hook_zone"]
-    start = time.time()
-    while time.time() - start < timeout_seconds:
+    needed = max(1, int(colors.get("hit_confirm_frames", 2)))
+    start = time.monotonic()
+    streak = 0
+    while time.monotonic() - start < timeout_seconds:
         if shared.should_stop_cycle():
             return False
-        ratio = _hook_zone_ratio(sct, hz)
-        debug_tools.log_ratio("hook_zone_hit", ratio, colors["hit_min_ratio"])
-        if ratio >= colors["hit_min_ratio"]:
-            log.info(f"Peixe alinhado (ratio={ratio:.4f}) -> ESPACO")
+        reading = _read_hook(sct, hz)
+        debug_tools.log_ratio("hook_zone_hit", reading.bright_ratio, colors["hit_min_ratio"])
+        streak = streak + 1 if reading.bright_ratio >= colors["hit_min_ratio"] else 0
+        if streak >= needed:
+            log.info(f"Peixe alinhado (ratio={reading.bright_ratio:.4f}) -> ESPACO")
             if not dry_run:
                 input_sim.tap(keybinds["space_key"], hold_seconds=0.04)
             return True
@@ -92,7 +98,7 @@ def classify_pull_state(sct: mss.mss, regions: dict) -> str | None:
 
 def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: SharedState,
                        dry_run: bool, timeout_seconds: float, end_confirm_seconds: float,
-                       first_appear_timeout_seconds: float = 3.0) -> bool:
+                       first_appear_timeout_seconds: float = 3.0) -> CastOutcome:
     """Fase de puxar. Duas situacoes SAO DIFERENTES e precisam de logica
     diferente:
 
@@ -134,12 +140,12 @@ def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: Share
     stable_count = 0
     none_since: float | None = None
     panel_seen = False
-    start = time.time()
+    start = time.monotonic()
 
     try:
-        while time.time() - start < timeout_seconds:
+        while time.monotonic() - start < timeout_seconds:
             if shared.should_stop_cycle():
-                return False
+                return CastOutcome.STOPPED
 
             state = classify_pull_state(sct, regions)
             shared.update(fish_state_text={"gray": "Calmo", "red": "Puxando forte", None: "-"}[state])
@@ -164,21 +170,21 @@ def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: Share
                 if confirmed:
                     none_since = None
             elif not panel_seen:
-                if time.time() - start >= first_appear_timeout_seconds:
+                if time.monotonic() - start >= first_appear_timeout_seconds:
                     log.warning(
                         f"Painel de puxar nunca apareceu em {first_appear_timeout_seconds:.1f}s "
                         f"apos o ESPACO -- a regiao 'pulling_state' ou as cores em DEFAULT_COLORS "
                         f"provavelmente nao batem com este jogo/tela. Rode com --debug pra ver as "
                         f"proporcoes de cor e as screenshots da regiao capturada."
                     )
-                    return False
+                    return CastOutcome.NO_PANEL
             else:
                 if none_since is None:
-                    none_since = time.time()
-                elif time.time() - none_since >= end_confirm_seconds:
+                    none_since = time.monotonic()
+                elif time.monotonic() - none_since >= end_confirm_seconds:
                     log.info(f"Painel de pesca sumiu (ausente por {end_confirm_seconds:.2f}s "
                              f"seguidos) -> peixe capturado/perdido")
-                    return True
+                    return CastOutcome.CAPTURED
 
             if confirmed and state is not None:
                 target_key = keybinds["pull_key"] if state == "gray" else keybinds["release_key"]
@@ -192,7 +198,7 @@ def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: Share
 
         log.warning("Timeout na fase de puxar o peixe"
                      + ("" if panel_seen else " (painel nunca chegou a aparecer)"))
-        return False
+        return CastOutcome.PULL_TIMEOUT if panel_seen else CastOutcome.NO_PANEL
     finally:
         if not dry_run:
             input_sim.release_all()
@@ -217,33 +223,37 @@ def run_start_sequence(keybinds: dict, dry_run: bool, hwnd: int | None = None) -
 
 
 def do_one_cast(sct: mss.mss, regions: dict, keybinds: dict, timings: dict,
-                 shared: SharedState, dry_run: bool = False, hwnd: int | None = None) -> bool:
+                 shared: SharedState, dry_run: bool = False, hwnd: int | None = None) -> CastOutcome:
     """Executa um ciclo completo de pesca (lancar -> esperar fisgada ->
-    timing -> puxar). Retorna True se completou (peixe capturado/perdido de
-    forma 'normal'), False se abortou por timeout ou pedido de parada.
-    Atualiza shared.state a cada fase. `hwnd`, quando fornecido, e usado pra
-    garantir que o FiveM esta em primeiro plano antes de simular teclado
-    (ver run_start_sequence)."""
+    timing -> puxar) e devolve COMO terminou (CastOutcome): CAPTURED, ou o
+    motivo da falha, ou STOPPED se foi interrompido (parar/panico/watchdog --
+    isso nao e falha). Atualiza shared.state a cada fase. `hwnd`, quando
+    fornecido, e usado pra garantir que o FiveM esta em primeiro plano antes
+    de simular teclado (ver run_start_sequence)."""
+    def failed(outcome: CastOutcome) -> CastOutcome:
+        return CastOutcome.STOPPED if shared.should_stop_cycle() else outcome
+
     if shared.should_stop_cycle():
-        return False
+        return CastOutcome.STOPPED
 
     run_start_sequence(keybinds, dry_run, hwnd)
 
     shared.set_state(AppState.AGUARDANDO_MINIGAME, "Aguardando a linha afundar e o peixe beliscar...")
     if not wait_for_bite(sct, regions, shared, dry_run, timings["bite_timeout_seconds"]):
-        return False
+        return failed(CastOutcome.NO_BITE)
 
     shared.set_state(AppState.AUTOMACAO, "Peixe beliscou! Esperando o momento certo pra fisgar...")
     if not run_timing_minigame(sct, regions, keybinds, shared, dry_run, timings["hit_timeout_seconds"]):
-        return False
+        return failed(CastOutcome.HIT_TIMEOUT)
 
     shared.set_state(AppState.AUTOMACAO, "Puxando o peixe...")
-    if not run_pulling_phase(sct, regions, keybinds, shared, dry_run,
-                              timings["pulling_timeout_seconds"],
-                              timings.get("end_confirm_seconds", 1.2),
-                              timings.get("pull_panel_first_appear_timeout_seconds", 3.0)):
-        return False
+    outcome = run_pulling_phase(sct, regions, keybinds, shared, dry_run,
+                                 timings["pulling_timeout_seconds"],
+                                 timings.get("end_confirm_seconds", 1.2),
+                                 timings.get("pull_panel_first_appear_timeout_seconds", 6.0))
+    if outcome is not CastOutcome.CAPTURED:
+        return failed(outcome)
 
     shared.update(casts_done=shared.casts_done + 1, fish_state_text="-", distance_text="-")
     shared.set_state(AppState.CAPTURA_CONCLUIDA)
-    return True
+    return CastOutcome.CAPTURED

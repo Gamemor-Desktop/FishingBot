@@ -20,7 +20,7 @@ import logging
 import sys
 import threading
 
-from fishingbot import config_store, debug_tools, input_sim, single_instance
+from fishingbot import config_store, debug_tools, diagnostics, input_sim, single_instance
 from fishingbot.gui import run_app
 from fishingbot.window_detect import setup_dpi_awareness
 
@@ -82,6 +82,7 @@ def main() -> None:
 
     _setup_logging(debug=args.debug)
     _install_crash_hooks()
+    diagnostics.install_ring_handler()  # ultimas linhas de log pro pacote de diagnostico
     atexit.register(input_sim.release_all)  # ultima rede de seguranca ao sair
     if args.debug:
         debug_tools.enable()

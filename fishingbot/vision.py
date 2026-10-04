@@ -4,6 +4,8 @@ Tudo aqui trabalha em cima de arrays numpy BGR (formato que o mss/opencv usam).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import cv2
 import mss
@@ -57,6 +59,44 @@ def pixel_ratio(mask: np.ndarray) -> float:
     if mask.size == 0:
         return 0.0
     return float(np.count_nonzero(mask)) / float(mask.size)
+
+
+# Largura (px) da regiao hook_zone na resolucao de referencia 1920x1080
+# (regions.DEFAULT_FRACTIONS: 252px). Os limites de area da bolinha em
+# regions.DEFAULT_COLORS foram medidos nela; em outra resolucao a regiao muda
+# de tamanho e as areas escalam com o quadrado da razao.
+HOOK_REF_WIDTH = 252
+
+
+@dataclass
+class HookReading:
+    ball: bool          # existe um disco compacto e brilhante (a bolinha)
+    bright_ratio: float  # proporcao de pixels brilhantes vermelho-laranja
+    mask: np.ndarray    # mascara usada (pra debug)
+
+
+def read_hook(frame_bgr: np.ndarray, colors: dict) -> HookReading:
+    """Le a zona da fisgada. A mascara so aceita pixels BRILHANTES (V alto):
+    a roupa do personagem tem o mesmo matiz, mas e bem mais escura. `ball`
+    exige ainda a FORMA da bolinha (componente quase quadrado e bem
+    preenchido), o que descarta restos de roupa/cenario mesmo que passem na
+    cor. Ver o racional e as medicoes em regions.DEFAULT_COLORS['hook_zone']."""
+    mask = hsv_mask(frame_bgr, colors["lower"], colors["upper"])
+    ratio = pixel_ratio(mask)
+    ball = False
+    if ratio > 0:
+        scale = max(frame_bgr.shape[1] / HOOK_REF_WIDTH, 0.1)
+        area_min = colors["ball_min_area"] * scale * scale
+        area_max = colors["ball_max_area"] * scale * scale
+        n, _labels, stats, _cent = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        for i in range(1, n):
+            w, h, area = int(stats[i, cv2.CC_STAT_WIDTH]), int(stats[i, cv2.CC_STAT_HEIGHT]),                 int(stats[i, cv2.CC_STAT_AREA])
+            if not (area_min <= area <= area_max) or w == 0 or h == 0:
+                continue
+            if colors["ball_aspect_min"] <= w / h <= colors["ball_aspect_max"]                     and area / (w * h) >= colors["ball_min_fill"]:
+                ball = True
+                break
+    return HookReading(ball=ball, bright_ratio=ratio, mask=mask)
 
 
 def largest_blob_centroid(mask: np.ndarray, min_area: int = 10) -> tuple[float, float] | None:

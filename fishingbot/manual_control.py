@@ -70,6 +70,20 @@ def ensure_listener() -> None:
             )
 
 
+def hook_active() -> bool:
+    """True se o ENTER global esta registrado (senao so o botao CONTINUAR vale)."""
+    return _hook_registered
+
+
+def confirm() -> bool:
+    """Confirmacao pela interface (botao CONTINUAR): mesmo efeito do ENTER,
+    tambem so vale enquanto estiver esperando. Retorna se foi aceita."""
+    if _armed.is_set():
+        _confirmed.set()
+        return True
+    return False
+
+
 def arm() -> None:
     """Liga o gatilho: a partir de agora, um ENTER conta como confirmacao.
     Limpa qualquer confirmacao antiga que possa ter sobrado."""

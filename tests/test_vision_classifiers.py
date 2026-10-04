@@ -1,4 +1,6 @@
-"""Testes de caracterizacao da deteccao por cor, com capturas reais.
+"""Testes de caracterizacao do painel de puxar, com capturas reais.
+
+(A zona da fisgada tem seus proprios testes em test_hook_detector.py.)
 
 Cada fixture foi rotulada olhando a imagem (nao o resultado do codigo). Os
 casos em que o codigo ATUAL erra estao marcados como xfail(strict=True):
@@ -12,13 +14,9 @@ from __future__ import annotations
 import pytest
 
 from fishingbot import fishing_logic
-from fishingbot.regions import DEFAULT_COLORS, Region
+from fishingbot.regions import Region
 
 PULL_REGION = {"pulling_state": Region(24, 528, 270, 43)}
-HOOK_REGION = Region(756, 528, 252, 108)
-
-BITE_MIN = DEFAULT_COLORS["hook_zone"]["bite_min_ratio"]
-HIT_MIN = DEFAULT_COLORS["hook_zone"]["hit_min_ratio"]
 
 
 def _known_bug(reason: str):
@@ -74,43 +72,3 @@ PULL_CASES = [
 def test_classify_pull_state(make_sct, name, expected, _desc):
     sct = make_sct("pulling_state", name)
     assert fishing_logic.classify_pull_state(sct, PULL_REGION) == expected
-
-
-# -- zona da fisgada (hook_zone) -----------------------------------------
-
-def _ratio(make_sct, name: str) -> float:
-    return fishing_logic._hook_zone_ratio(make_sct("hook_zone", name), HOOK_REGION)
-
-
-def test_hook_zone_bolinha_pequena_passa_limiar_de_mordida(make_sct):
-    # 010829: bolinha vermelha + linha visiveis, ainda sem o peixe alinhado
-    ratio = _ratio(make_sct, "010829")
-    assert BITE_MIN <= ratio < HIT_MIN
-
-
-def test_hook_zone_bolinha_alinhada_passa_limiar_de_fisgada(make_sct):
-    # 012456: bolinha + peixe vermelho + '!' (momento certo de apertar ESPACO)
-    assert _ratio(make_sct, "012456") >= HIT_MIN
-
-
-@pytest.mark.parametrize("name", ["010809", "011556"])
-def test_hook_zone_sem_bolinha_fica_abaixo_da_mordida(make_sct, name):
-    assert _ratio(make_sct, name) < BITE_MIN
-
-
-@pytest.mark.parametrize("name", [
-    pytest.param("012430", marks=_known_bug(
-        "ruido da roupa (ratio ~0.007) ja passa bite_min_ratio=0.0045")),
-    pytest.param("013035", marks=_known_bug(
-        "ruido da roupa (ratio ~0.011) ja passa bite_min_ratio=0.0045")),
-    pytest.param("013049", marks=_known_bug(
-        "ruido da roupa (ratio ~0.012) ja passa bite_min_ratio=0.0045")),
-])
-def test_hook_zone_ruido_da_roupa_nao_vira_mordida(make_sct, name):
-    assert _ratio(make_sct, name) < BITE_MIN
-
-
-@_known_bug("ruido da roupa (ratio ~0.0227) passa ate hit_min_ratio=0.018, "
-            "disparando ESPACO sem a bolinha real")
-def test_hook_zone_ruido_da_roupa_nao_vira_fisgada(make_sct):
-    assert _ratio(make_sct, "013000") < HIT_MIN

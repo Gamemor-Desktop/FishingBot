@@ -34,9 +34,11 @@ fora do git.
 4. Va pescar. O bot assume a partir do momento em que voce usa a vara.
 5. Quando o peixe for capturado, o bot **para** e mostra "Peixe capturado!
    Pegue e corte o peixe manualmente. Pressione ENTER quando estiver pronto
-   para pescar novamente." Essa etapa (pegar o peixe no chao e corta-lo) nao
+   para pescar novamente." O bot apita e o botao **CONTINUAR** fica ativo.
+   Essa etapa (pegar o peixe no chao e corta-lo) nao
    e automatizada -- faca-a normalmente no jogo e, quando terminar, aperte
-   **ENTER** pra o bot lançar a vara de novo. O ENTER so tem efeito nesse
+   **ENTER** (ou clique em CONTINUAR) pra o bot lançar a vara de novo, depois
+   de uma folga de ~1,5 s. O ENTER so tem efeito nesse
    momento especifico; apertado em qualquer outra hora (durante o minigame,
    por exemplo) e ignorado, de proposito, pra nao atrapalhar a automacao.
 6. **F10** (tecla de emergencia) para tudo na hora, mesmo com o jogo em foco.
@@ -159,6 +161,33 @@ pequena).
   hooks de excecao nao tratada como ultima rede de seguranca.
 - **Instancia unica**: abrir um segundo `FishingBot.exe` mostra um aviso e sai.
 
+### Anti-falha (o que impede o bot de repetir o mesmo erro)
+
+- **Resultado de cada lance** (`stats.py`): capturado, sem mordida, nao fisgou
+  a tempo, painel de puxar nao apareceu, timeout ao puxar ou erro de captura.
+  A interface e o log mostram o resumo da sessao (lances, capturas, % de
+  sucesso, falhas seguidas); o detalhe por motivo vai no log e no diagnostico.
+- **Disjuntor**: `safety.max_consecutive_failures` (padrao **5**) lances
+  seguidos sem nenhuma captura desligam o bot, mostram o motivo e salvam um
+  **pacote de diagnostico** em `%LOCALAPPDATA%\FishingBot\diagnostics\<data>`
+  (motivo, ultimas linhas do log, janela inteira e cada regiao de
+  reconhecimento naquele instante; so os 10 mais recentes ficam). Entre
+  falhas, o bot espera cada vez mais (0,5 s, 1 s, 2 s... ate 5 s).
+- **Monitor de saude** (thread propria, 1x/s): tela **preta** por 3 s
+  (tipico de FiveM em tela cheia exclusiva) ou imagem **congelada** por 15 s
+  desligam o bot com mensagem. Sem **nenhuma captura** por 15 min
+  (`safety.progress_timeout_minutes`) tambem; a espera do ENTER nao conta.
+- **Regioes validadas**: antes de pescar, se alguma regiao de captura cai fora
+  da tela (janela parcialmente fora do monitor), o bot recusa e avisa -- o
+  `mss` nao da erro nesse caso, devolve preto.
+- **Fisgada por forma e brilho** (`vision.read_hook`): a bolinha vermelha e um
+  disco compacto e *brilhante*; a roupa do personagem tem o mesmo matiz mas e
+  bem mais escura e irregular. Antes, so a proporcao de pixels vermelhos
+  decidia, e o ruido da roupa (ate 0,023) era maior que a propria bolinha
+  (~0,006). Medido em 123 capturas reais, a regra nova acha 4/4 bolinhas e 0
+  falsos. O ESPACO exige 2 frames seguidos de peixe alinhado
+  (`hit_confirm_frames`).
+
 ### Maquina de estados
 
 `controller.py` implementa exatamente o fluxo pedido:
@@ -211,7 +240,12 @@ Criado automaticamente na primeira execucao. Guarda:
   disco a cada frame).
 - `keybinds` — teclas usadas (`use_item_key`, `space_key`, `pull_key`, `panic_key`,
   `release_key`). Editavel se o seu servidor usar binds diferentes.
-- `timings` — timeouts de cada fase em segundos.
+- `timings` — timeouts de cada fase em segundos (inclui
+  `after_confirm_delay_seconds`, a folga depois do ENTER).
+- `safety` — limites do anti-falha: `max_consecutive_failures`,
+  `progress_timeout_minutes`, `retry_backoff_base_seconds` /
+  `retry_backoff_max_seconds`, `black_screen_seconds`, `frozen_screen_seconds`.
+  Valores invalidos (texto, negativo) voltam ao padrao.
 - `fractions_override` — pra ajuste fino manual das regioes do minigame,
   caso a deteccao padrao (`regions.DEFAULT_FRACTIONS`) nao bata certinho no
   seu caso. Formato: `{"hook_zone": {"fx": 0.39, "fy": 0.49, "fw": 0.13,

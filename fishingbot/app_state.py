@@ -79,6 +79,11 @@ class SharedState:
     # Qualquer fase checa isso via should_stop_cycle(), sem mudar assinaturas.
     abort_reason: str = ""
 
+    stats_text: str = ""          # resumo da sessao (lances, capturas, falhas seguidas)
+    # time.monotonic() do ultimo "progresso" (inicio da automacao, captura,
+    # retomada pelo ENTER). O monitor de saude para o bot se isto ficar velho.
+    last_progress_at: float = 0.0
+
     def set_state(self, new_state: AppState, message: str | None = None) -> None:
         with self._lock:
             self.state = new_state
@@ -107,6 +112,8 @@ class SharedState:
                 "distance_text": self.distance_text,
                 "error_message": self.error_message,
                 "abort_reason": self.abort_reason,
+                "stats_text": self.stats_text,
+                "last_progress_at": self.last_progress_at,
             }
 
     def should_stop_cycle(self) -> bool:
@@ -121,6 +128,10 @@ class SharedState:
         with self._lock:
             if not self.abort_reason:
                 self.abort_reason = reason
+
+    def mark_progress(self) -> None:
+        with self._lock:
+            self.last_progress_at = time.monotonic()
 
     def clear_abort(self) -> None:
         with self._lock:

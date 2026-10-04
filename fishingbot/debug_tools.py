@@ -72,7 +72,7 @@ def debug_dir() -> Path:
     return config_store.config_dir() / "debug"
 
 
-def log_ratio(name: str, ratio: float, threshold: float, extra: str = "") -> None:
+def log_ratio(name: str, ratio: float, threshold: float | None, extra: str = "") -> None:
     """Loga (nivel DEBUG, throttled) a proporcao de pixels calculada pra
     `name` nesta iteracao, junto do limite configurado pra bater a
     deteccao. Chamado toda iteracao do loop de automacao, mas so imprime de
@@ -84,6 +84,9 @@ def log_ratio(name: str, ratio: float, threshold: float, extra: str = "") -> Non
     if now - _last_event.get(key, 0.0) < LOG_INTERVAL_SECONDS:
         return
     _last_event[key] = now
+    if threshold is None:  # sinal sem limiar proprio (ex: bolinha, decidida por forma)
+        log.debug(f"[debug] {name}: ratio={ratio:.4f} {extra}")
+        return
     marca = "OK" if ratio >= threshold else "abaixo do limite"
     log.debug(f"[debug] {name}: ratio={ratio:.4f} limite={threshold:.4f} ({marca}) {extra}")
 
