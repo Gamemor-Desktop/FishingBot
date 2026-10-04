@@ -86,6 +86,11 @@ DEFAULTS = {
         # bot apertar a tecla de usar a vara: o personagem ainda pode estar
         # na animacao de cortar quando o ENTER chega
         "after_confirm_delay_seconds": 1.5,
+        # a puxada nao pode ser dada como concluida antes disso, mesmo que o
+        # painel pareca ter sumido. Em log real, a maioria das "capturas"
+        # terminava 0-5s depois do ESPACO (puxadas de verdade duram 30-200s):
+        # eram leituras erradas do painel, com o peixe ainda na linha.
+        "pull_min_seconds": 8.0,
     },
     # Anti-falha (ver controller.py / capture_health.py)
     "safety": {
@@ -103,6 +108,9 @@ DEFAULTS = {
         # tela totalmente preta / imagem identica por tanto tempo = erro
         "black_screen_seconds": 3.0,
         "frozen_screen_seconds": 15.0,
+        # FiveM minimizado/sem foco (ex: voce foi olhar o bot) PAUSA o ciclo;
+        # passando disso o bot para em vez de ficar esperando pra sempre
+        "pause_timeout_seconds": 120,
     },
     "fractions_override": {},
     "ui": {"start_minimized": False},

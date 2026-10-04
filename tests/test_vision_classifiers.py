@@ -19,10 +19,6 @@ from fishingbot.regions import Region
 PULL_REGION = {"pulling_state": Region(24, 528, 270, 43)}
 
 
-def _known_bug(reason: str):
-    return pytest.mark.xfail(strict=True, reason=reason)
-
-
 # -- painel de puxar (classify_pull_state) -------------------------------
 
 PULL_CASES = [
@@ -41,30 +37,11 @@ PULL_CASES = [
     ("013000", None, "agua/cinza, sem painel"),
     ("013035", None, "cerca branca, sem painel"),
     ("013004", None, "madeira com cerca, sem painel"),
-    pytest.param(
-        "012458", "gray", "Calmo translucido sobre fundo marrom",
-        id="012458",
-        marks=_known_bug("falso negativo: painel translucido sobre fundo claro "
-                         "fica fora da faixa HSV de 'Calmo' (ratio 0.0)"),
-    ),
-    pytest.param(
-        "013108", "gray", "Calmo translucido sobre fundo claro",
-        id="013108",
-        marks=_known_bug("falso negativo: painel translucido sobre fundo claro "
-                         "fica fora da faixa HSV de 'Calmo' (ratio 0.06)"),
-    ),
-    pytest.param(
-        "010830", None, "aviso 'Parar de pescar' sobre agua escura",
-        id="010830",
-        marks=_known_bug("falso positivo: aviso escuro cai na faixa de 'Calmo' "
-                         "(ratio 0.86) e conta como painel visto"),
-    ),
-    pytest.param(
-        "013003", None, "madeira/sombra sem painel",
-        id="013003",
-        marks=_known_bug("falso positivo: textura de madeira marrom bate na "
-                         "faixa de 'Puxando forte' (ratio ~0.30, no limite)"),
-    ),
+    # Corrigidos em 03/10/2026 pelo texto branco do painel (pulling_text):
+    ("012458", "gray", "Calmo translucido sobre fundo marrom (antes: nao detectado)"),
+    ("013108", "gray", "Calmo translucido sobre fundo claro (antes: nao detectado)"),
+    ("010830", None, "aviso 'Parar de pescar' sobre agua escura (antes: lido como Calmo)"),
+    ("013003", None, "madeira/sombra sem painel (antes: lido como Puxando forte)"),
 ]
 
 

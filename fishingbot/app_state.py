@@ -79,6 +79,11 @@ class SharedState:
     # Qualquer fase checa isso via should_stop_cycle(), sem mudar assinaturas.
     abort_reason: str = ""
 
+    # Motivo da PAUSA do ciclo (FiveM minimizado / sem foco). Diferente de
+    # abort_reason: pausar NAO cancela o lance -- as fases congelam (sem
+    # teclas, sem gastar timeout) e seguem de onde pararam quando o jogo volta.
+    pause_reason: str = ""
+
     stats_text: str = ""          # resumo da sessao (lances, capturas, falhas seguidas)
     # time.monotonic() do ultimo "progresso" (inicio da automacao, captura,
     # retomada pelo ENTER). O monitor de saude para o bot se isto ficar velho.
@@ -112,6 +117,7 @@ class SharedState:
                 "distance_text": self.distance_text,
                 "error_message": self.error_message,
                 "abort_reason": self.abort_reason,
+                "pause_reason": self.pause_reason,
                 "stats_text": self.stats_text,
                 "last_progress_at": self.last_progress_at,
             }
@@ -128,6 +134,31 @@ class SharedState:
         with self._lock:
             if not self.abort_reason:
                 self.abort_reason = reason
+
+    def set_pause(self, reason: str) -> None:
+        with self._lock:
+            self.pause_reason = reason
+
+    def clear_pause(self) -> None:
+        with self._lock:
+            self.pause_reason = ""
+
+    def checkpoint(self) -> float:
+        """Chamado pelas fases no topo de cada iteracao. Enquanto o ciclo
+        estiver pausado, bloqueia ate voltar (ou mandarem parar/abortar) e
+        devolve quantos segundos ficou parado, pra fase empurrar seus
+        timeouts -- o tempo em que o jogo estava minimizado nao conta."""
+        t0 = None
+        while True:
+            with self._lock:
+                paused = bool(self.pause_reason) and not (
+                    self.quit_requested or not self.user_wants_running or self.abort_reason)
+            if not paused:
+                break
+            if t0 is None:
+                t0 = time.monotonic()
+            time.sleep(0.05)
+        return 0.0 if t0 is None else time.monotonic() - t0
 
     def mark_progress(self) -> None:
         with self._lock:

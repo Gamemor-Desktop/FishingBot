@@ -9,11 +9,7 @@ import pytest
 from fishingbot import controller as controller_mod
 from fishingbot import input_sim
 from fishingbot.app_state import AppState, SharedState
-from fishingbot.controller import (
-    Controller,
-    _WindowWatchdog,
-    check_window_health,
-)
+from fishingbot.controller import Controller, WindowAssessor, _WindowWatchdog
 from fishingbot.input_sim import FocusLostError
 from fishingbot.window_detect import WindowInfo
 
@@ -130,34 +126,82 @@ def test_shutdown_espera_a_thread_e_solta_tudo(ctrl, monkeypatch):
     assert ctrl.shared.snapshot()["quit_requested"] is True
 
 
-# -- watchdog ----------------------------------------------------------------------
+# -- avaliacao da janela ---------------------------------------------------------------
 
-def test_saude_da_janela_ok_quando_nada_mudou():
-    w = _window()
-    assert check_window_health(w, still_valid=lambda _: True, refresh=lambda x: x) is None
-
-
-def test_saude_da_janela_detecta_sumico():
-    w = _window()
-    assert "sumiu" in check_window_health(w, still_valid=lambda _: False, refresh=lambda x: x)
-    assert "sumiu" in check_window_health(w, still_valid=lambda _: True, refresh=lambda _: None)
+def _assessor(window=None, require_focus=True, **probes):
+    base = dict(exists=lambda: True, minimized=lambda: False, foreground=lambda: True,
+                rect=lambda: (0, 0, 1920, 1080))
+    base.update(probes)
+    return WindowAssessor(window or _window(width=1920, height=1080), require_focus=require_focus, **base)
 
 
-def test_saude_da_janela_detecta_mudanca_de_posicao_e_tamanho():
-    w = _window()
-    moved = _window(left=100)
-    resized = _window(width=1280, height=720)
-    assert "mudou" in check_window_health(w, still_valid=lambda _: True, refresh=lambda _: moved)
-    assert "mudou" in check_window_health(w, still_valid=lambda _: True, refresh=lambda _: resized)
+def test_janela_igual_esta_ok():
+    assert _assessor().assess() == ("ok", "")
 
 
-def test_watchdog_pede_aborto_do_ciclo_quando_a_janela_some():
+def test_janela_que_deixou_de_existir_aborta():
+    action, reason = _assessor(exists=lambda: False).assess()
+    assert action == "abort" and "sumiu" in reason
+
+
+def test_minimizada_pausa_em_vez_de_abortar():
+    """O FiveM se minimiza sozinho ao perder o foco: isso NAO e janela sumida."""
+    assert _assessor(minimized=lambda: True).assess() == ("pause", "FiveM minimizado")
+
+
+def test_sem_foco_pausa_so_quando_exige_foco():
+    assert _assessor(foreground=lambda: False).assess() == ("pause", "FiveM sem foco")
+    assert _assessor(require_focus=False, foreground=lambda: False).assess() == ("ok", "")
+
+
+def test_tamanho_transitorio_da_restauracao_nao_aborta():
+    """Restaurar da barra de tarefas passa por 1904x1042 -> 1920x1081 -> 1920x1080."""
+    seq = iter([(0, 0, 1904, 1042), (0, 0, 1920, 1081), (0, 0, 1920, 1080), (0, 0, 1920, 1080)])
+    a = _assessor(rect=lambda: next(seq))
+    assert a.assess()[0] == "pause"
+    assert a.assess()[0] == "pause"
+    assert a.assess()[0] == "pause"   # 1080 ainda e diferente da leitura anterior (1081)
+    assert a.assess() == ("ok", "")   # estabilizou, igual a calibrada
+
+
+def test_um_pixel_de_diferenca_estavel_nao_recalibra():
+    a = _assessor(rect=lambda: (0, 0, 1920, 1081))
+    a.assess()                         # primeira leitura diferente da inicial: ajustando
+    assert a.assess() == ("ok", "")    # estavel dentro da tolerancia de 4px
+
+
+def test_mudanca_de_verdade_e_estavel_aborta_pra_recalibrar():
+    a = _assessor(rect=lambda: (0, 0, 1280, 720))
+    assert a.assess()[0] == "pause"
+    action, reason = a.assess()
+    assert action == "abort" and "mudou" in reason
+
+
+def test_janela_deslocada_pra_outro_monitor_aborta():
+    a = _assessor(rect=lambda: (1920, 0, 1920, 1080))
+    a.assess()
+    assert a.assess()[0] == "abort"
+
+
+# -- watchdog ------------------------------------------------------------------------------
+
+class _ScriptedAssessor:
+    """Devolve a sequencia de avaliacoes e repete a ultima."""
+    def __init__(self, *seq):
+        self._seq = list(seq)
+
+    def assess(self):
+        return self._seq.pop(0) if len(self._seq) > 1 else self._seq[0]
+
+
+def _dog(shared, assessor, **kw):
+    return _WindowWatchdog(shared, _window(), interval=0.01, assessor=assessor, **kw)
+
+
+def test_watchdog_pede_aborto_quando_a_janela_some():
     shared = SharedState()
     shared.update(user_wants_running=True)
-    assert shared.should_stop_cycle() is False
-
-    dog = _WindowWatchdog(shared, _window(), interval=0.02,
-                          check=lambda w: "A janela do FiveM sumiu")
+    dog = _dog(shared, _ScriptedAssessor(("abort", "A janela do FiveM sumiu")))
     dog.start()
     try:
         assert _wait_for(shared.should_stop_cycle)
@@ -170,15 +214,79 @@ def test_watchdog_com_erro_na_checagem_aborta_por_seguranca():
     shared = SharedState()
     shared.update(user_wants_running=True)
 
-    def bad(_w):
-        raise OSError("win32")
+    class Bad:
+        def assess(self):
+            raise OSError("win32")
 
-    dog = _WindowWatchdog(shared, _window(), interval=0.02, check=bad)
+    dog = _dog(shared, Bad())
     dog.start()
     try:
         assert _wait_for(shared.should_stop_cycle)
     finally:
         dog.stop()
+
+
+def test_minimizar_pausa_solta_teclas_e_voltar_retoma_sem_abortar(monkeypatch):
+    released = []
+    monkeypatch.setattr(controller_mod.input_sim, "release_all", lambda: released.append(1))
+    shared = SharedState()
+    shared.update(user_wants_running=True)
+    dog = _dog(shared, _ScriptedAssessor(("pause", "FiveM minimizado"), ("pause", "FiveM minimizado"),
+                                         ("ok", "")))
+    dog.start()
+    try:
+        assert _wait_for(lambda: shared.snapshot()["pause_reason"] == "FiveM minimizado")
+        assert released, "teclas seguradas devem ser soltas ao pausar"
+        assert _wait_for(lambda: shared.snapshot()["pause_reason"] == "")
+    finally:
+        dog.stop()
+    assert shared.should_stop_cycle() is False, "pausar nao cancela o lance"
+
+
+def test_watchdog_para_o_bot_se_a_pausa_passar_do_limite(monkeypatch):
+    monkeypatch.setattr(controller_mod.input_sim, "release_all", lambda: None)
+    shared = SharedState()
+    shared.update(user_wants_running=True)
+    dog = _dog(shared, _ScriptedAssessor(("pause", "FiveM sem foco")), pause_timeout=0.05)
+    dog.start()
+    try:
+        assert _wait_for(lambda: shared.snapshot()["state"] == AppState.ERRO)
+    finally:
+        dog.stop()
+    snap = shared.snapshot()
+    assert snap["user_wants_running"] is False and "FiveM sem foco" in snap["error_message"]
+
+
+def test_durante_a_espera_manual_o_jogador_pode_sair_do_jogo(monkeypatch):
+    monkeypatch.setattr(controller_mod.input_sim, "release_all", lambda: None)
+    shared = SharedState()
+    shared.update(user_wants_running=True)
+    shared.set_state(AppState.AGUARDANDO_CONFIRMACAO_MANUAL)
+    dog = _dog(shared, _ScriptedAssessor(("pause", "FiveM minimizado")))
+    dog.start()
+    time.sleep(0.2)
+    dog.stop()
+    assert shared.snapshot()["pause_reason"] == ""
+    assert shared.should_stop_cycle() is False
+
+
+def test_checkpoint_bloqueia_enquanto_pausado_e_devolve_o_tempo_parado():
+    shared = SharedState()
+    shared.update(user_wants_running=True)
+    assert shared.checkpoint() == 0.0
+    shared.set_pause("FiveM minimizado")
+    threading.Timer(0.3, shared.clear_pause).start()
+    waited = shared.checkpoint()
+    assert 0.25 <= waited < 1.0
+
+
+def test_checkpoint_acorda_se_mandarem_parar():
+    shared = SharedState()
+    shared.update(user_wants_running=True)
+    shared.set_pause("FiveM minimizado")
+    threading.Timer(0.2, lambda: shared.update(user_wants_running=False)).start()
+    shared.checkpoint()  # nao pode ficar preso
+    assert shared.should_stop_cycle() is True
 
 
 def test_clear_abort_libera_o_proximo_ciclo():

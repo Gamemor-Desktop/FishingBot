@@ -151,9 +151,17 @@ pequena).
   ate voce apertar INICIAR de novo. Se o hook global nao puder ser registrado
   (jogo rodando como administrador), a interface avisa e o botao PARAR continua
   valendo.
-- **Watchdog da janela**: durante o ciclo de pesca (que pode durar minutos) a
-  janela e conferida a cada 0,5 s; se sumir ou mudar de posicao/tamanho, o
-  ciclo e abortado e o bot volta a procurar/recalibrar.
+- **Watchdog da janela** (a cada 0,1 s, durante o lance): o FiveM **se
+  minimiza sozinho ao perder o foco** (basta clicar no bot) e, ao restaurar,
+  passa por tamanhos transitorios (1904x1042 -> 1920x1081 -> 1920x1080). Isso
+  **pausa** o lance: solta as teclas, nao captura a tela, nao gasta timeout, e
+  ele continua de onde parou quando o jogo volta (`PAUSADO` na interface).
+  Passando de `safety.pause_timeout_seconds` (120 s) o bot para. So **aborta**
+  se a janela deixar de existir ou ficar de verdade com outro
+  tamanho/posicao (diferencas de ate 4 px sao ignoradas); ai recalibra.
+  Apertar INICIAR com o jogo minimizado restaura ele sozinho.
+- **Espera manual a prova de reinicio**: se o laco reiniciar enquanto voce
+  ainda corta o peixe, o bot volta a esperar o ENTER em vez de lancar a vara.
 - **Supervisor**: qualquer erro inesperado e logado com traceback em
   `fishingbot.log`, solta as teclas e leva o bot ao estado de erro (antes a
   thread morria em silencio e a tela continuava dizendo "Aguardando pesca...").
@@ -180,6 +188,14 @@ pequena).
 - **Regioes validadas**: antes de pescar, se alguma regiao de captura cai fora
   da tela (janela parcialmente fora do monitor), o bot recusa e avisa -- o
   `mss` nao da erro nesse caso, devolve preto.
+- **Fim da puxada**: o painel "PEIXE / Calmo / Puxando forte" e confirmado
+  pelo **texto branco** (independe do fundo, ja que a caixa e translucida):
+  sem texto nao ha painel (corrige "Parar de pescar" lido como Calmo e madeira
+  lida como Puxando forte), e texto branco sobre fundo escuro sem vermelho e
+  "Calmo" mesmo sobre fundo claro. Alem disso a puxada so pode ser dada como
+  concluida depois de `timings.pull_min_seconds` (8 s): em log real a maioria
+  das "capturas" terminava 0-5 s depois do ESPACO (puxadas de verdade duram
+  30-200 s), com o peixe ainda na linha.
 - **Fisgada por forma e brilho** (`vision.read_hook`): a bolinha vermelha e um
   disco compacto e *brilhante*; a roupa do personagem tem o mesmo matiz mas e
   bem mais escura e irregular. Antes, so a proporcao de pixels vermelhos
@@ -241,10 +257,10 @@ Criado automaticamente na primeira execucao. Guarda:
 - `keybinds` — teclas usadas (`use_item_key`, `space_key`, `pull_key`, `panic_key`,
   `release_key`). Editavel se o seu servidor usar binds diferentes.
 - `timings` — timeouts de cada fase em segundos (inclui
-  `after_confirm_delay_seconds`, a folga depois do ENTER).
+  `after_confirm_delay_seconds`, a folga depois do ENTER, e `pull_min_seconds`).
 - `safety` — limites do anti-falha: `max_consecutive_failures`,
   `progress_timeout_minutes`, `retry_backoff_base_seconds` /
-  `retry_backoff_max_seconds`, `black_screen_seconds`, `frozen_screen_seconds`.
+  `retry_backoff_max_seconds`, `black_screen_seconds`, `frozen_screen_seconds`, `pause_timeout_seconds`.
   Valores invalidos (texto, negativo) voltam ao padrao.
 - `fractions_override` — pra ajuste fino manual das regioes do minigame,
   caso a deteccao padrao (`regions.DEFAULT_FRACTIONS`) nao bata certinho no

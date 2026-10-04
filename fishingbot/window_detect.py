@@ -271,6 +271,62 @@ def bring_to_foreground(hwnd: int) -> bool:
         return False
 
 
+def window_exists(hwnd: int) -> bool:
+    """A janela ainda existe e esta visivel (minimizada CONTA como existente:
+    o FiveM se minimiza sozinho ao perder o foco)."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        return bool(win32gui.IsWindow(hwnd)) and bool(win32gui.IsWindowVisible(hwnd))
+    except Exception:
+        return False
+
+
+def is_minimized(hwnd: int) -> bool:
+    if not IS_WINDOWS:
+        return False
+    try:
+        return bool(win32gui.IsIconic(hwnd))
+    except Exception:
+        return False
+
+
+def client_rect(hwnd: int) -> tuple[int, int, int, int] | None:
+    """(left, top, width, height) da area util em coordenadas de tela, ou None."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        abs_left, abs_top = win32gui.ClientToScreen(hwnd, (left, top))
+        return abs_left, abs_top, right - left, bottom - top
+    except Exception:
+        return None
+
+
+def find_minimized_game_window() -> int | None:
+    """hwnd da janela do jogo se ela existe mas esta MINIMIZADA (o FiveM se
+    minimiza ao perder o foco; find_fivem_window ignora janelas minimizadas)."""
+    if not IS_WINDOWS:
+        return None
+    found: list[int] = []
+
+    def _enum_handler(hwnd, _):
+        if not win32gui.IsWindowVisible(hwnd) or not win32gui.IsIconic(hwnd):
+            return
+        try:
+            class_name = win32gui.GetClassName(hwnd) or ""
+        except Exception:
+            class_name = ""
+        if is_game_window(_get_process_name(hwnd), class_name):
+            found.append(hwnd)
+
+    try:
+        win32gui.EnumWindows(_enum_handler, None)
+    except Exception:
+        return None
+    return found[0] if found else None
+
+
 def window_still_valid(info: WindowInfo) -> bool:
     if not IS_WINDOWS:
         return False

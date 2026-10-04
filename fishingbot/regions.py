@@ -129,6 +129,32 @@ DEFAULT_COLORS = {
             ([0, 30, 70], [15, 200, 255]),
         ],
     },
+    # Texto branco do painel ("Calmo", "Puxando forte", "Quase fora d'agua"):
+    # independe do fundo, ao contrario da cor da caixa, que e TRANSLUCIDA e
+    # muda com o cenario atras. Medido em 103 capturas reais (03/10/2026): o
+    # painel tem texto branco na metade direita em 3.5%-10% da area (27% sobre
+    # fundo claro), cercado de fundo escuro; o aviso "Parar de pescar" (texto
+    # vermelho), a agua, a madeira e o fundo cinza tem ~0%; a cerca branca tem
+    # 9%-59% mas SEM fundo escuro em volta (near_dark 0.14-0.22).
+    # Usos (ver fishing_logic.classify_pull_state):
+    #   - sem texto (< min_ratio) nao ha painel, mesmo que a cor "bata"
+    #     (elimina 'Parar de pescar' sobre agua escura lido como Calmo e a
+    #     madeira lida como Puxando forte);
+    #   - "Calmo" translucido sobre fundo marrom/claro, que a cor nao pega: texto
+    #     + fundo escuro em volta + nenhum vermelho = Calmo. Antes isso fazia o
+    #     bot achar que o painel tinha sumido e declarar "peixe capturado" 1-3s
+    #     depois do ESPACO, com o peixe ainda na linha.
+    "pulling_text": {
+        "x_start": 0.40,        # so a metade direita (onde fica o texto de estado)
+        "white_min_v": 225,
+        "white_max_s": 40,
+        "dark_max_v": 110,
+        "min_ratio": 0.01,
+        "calm_min_ratio": 0.02,
+        "calm_max_ratio": 0.20,
+        "calm_min_near_dark": 0.8,
+        "calm_max_red_ratio": 0.05,
+    },
 }
 
 

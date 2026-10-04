@@ -99,6 +99,26 @@ def read_hook(frame_bgr: np.ndarray, colors: dict) -> HookReading:
     return HookReading(ball=ball, bright_ratio=ratio, mask=mask)
 
 
+def panel_text_features(frame_bgr: np.ndarray, cfg: dict) -> tuple[float, float]:
+    """(proporcao de pixels de texto branco na metade direita do painel,
+    fracao desses pixels que tem fundo ESCURO por perto). O painel de verdade
+    tem texto branco sobre a caixa escura; cerca/parede branca tem muito
+    branco mas sem fundo escuro em volta, e o resto do cenario nao tem branco
+    nenhum. Ver regions.DEFAULT_COLORS['pulling_text']."""
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    right = hsv[:, int(frame_bgr.shape[1] * cfg["x_start"]):]
+    white = cv2.inRange(right, np.array([0, 0, cfg["white_min_v"]], dtype=np.uint8),
+                        np.array([179, cfg["white_max_s"], 255], dtype=np.uint8))
+    n_white = int(np.count_nonzero(white))
+    if n_white == 0:
+        return 0.0, 0.0
+    dark = cv2.inRange(right, np.array([0, 0, 0], dtype=np.uint8),
+                       np.array([179, 255, cfg["dark_max_v"]], dtype=np.uint8))
+    dark = cv2.dilate(dark, np.ones((7, 7), np.uint8))
+    near_dark = int(np.count_nonzero(cv2.bitwise_and(dark, white))) / n_white
+    return n_white / white.size, near_dark
+
+
 def largest_blob_centroid(mask: np.ndarray, min_area: int = 10) -> tuple[float, float] | None:
     """Retorna (cx, cy) do maior blob na mascara, em coordenadas relativas ao recorte usado."""
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

@@ -1,6 +1,9 @@
 """Disjuntor, backoff, monitor de saude e laco de automacao com falhas simuladas."""
 from __future__ import annotations
 
+import threading
+import time
+
 import numpy as np
 import pytest
 from mss.exception import ScreenShotError
@@ -160,8 +163,18 @@ def health(ctrl):
     return _HealthMonitor(ctrl.shared, _window(), {}, ctrl.cfg)
 
 
-def _snap(state=AppState.AGUARDANDO_MINIGAME, last_progress=0.0):
-    return {"state": state, "last_progress_at": last_progress, "stats_text": ""}
+def _snap(state=AppState.AGUARDANDO_MINIGAME, last_progress=0.0, pause=""):
+    return {"state": state, "last_progress_at": last_progress, "stats_text": "",
+            "pause_reason": pause}
+
+
+def _wait_for(cond, timeout=3.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if cond():
+            return True
+        time.sleep(0.02)
+    return False
 
 
 def _live(seed=0):
@@ -198,3 +211,68 @@ def test_saude_espera_manual_nao_e_travamento(health, ctrl):
     old = now - 3600                       # 1h esperando o ENTER do jogador
     assert health.evaluate(_snap(AppState.AGUARDANDO_CONFIRMACAO_MANUAL, old), black, now) is None
     assert ctrl.shared.snapshot()["last_progress_at"] >= now, "reinicia o relogio de progresso"
+
+
+def test_saude_pausa_do_jogo_nao_e_tela_preta_nem_travamento(health, ctrl):
+    black = np.zeros((36, 64), np.uint8)       # minimizado: a captura mostra o desktop
+    now = controller_mod.time.monotonic()
+    snap = _snap(last_progress=now - 3600, pause="FiveM minimizado")
+    for i in range(10):
+        assert health.evaluate(snap, black, now + i * 5) is None
+
+
+# -- espera manual pendente (nao lanca a vara sem a confirmacao do jogador) ------------------
+
+def test_laco_reiniciado_durante_a_espera_manual_volta_a_esperar(ctrl, loop_env, monkeypatch):
+    waits = []
+
+    def fake_wait(_abort):
+        waits.append(1)
+        return len(waits) > 1          # 1a vez: interrompido (laco reinicia); 2a: confirma
+
+    casts = []
+    seq = iter([O.CAPTURED, O.NO_BITE, O.NO_BITE, O.NO_BITE])
+
+    def run_loop():
+        monkeypatch.setattr(fishing_logic, "do_one_cast", lambda *a, **k: casts.append(1) or next(seq))
+        monkeypatch.setattr(manual_control, "wait_for_confirmation", fake_wait)
+        monkeypatch.setattr(controller_mod.time, "sleep", lambda _s: None)
+        win = _window()
+        regions = compute_all_regions(win.left, win.top, win.width, win.height)
+        ctrl.shared.update(user_wants_running=True)
+        ctrl._automation_loop(win, regions, ctrl.cfg["keybinds"], ctrl.cfg["timings"])
+
+    run_loop()                           # captura -> espera -> "interrompido" -> sai
+    assert ctrl._pending_manual is True and len(casts) == 1
+    ctrl.shared.clear_abort()
+    run_loop()                           # reinicio: tem que ESPERAR antes de lancar
+    assert waits == [1, 1], "esperou de novo em vez de lancar a vara"
+    assert ctrl._pending_manual is False
+    assert len(casts) == 1 + 3, "so lancou depois da confirmacao"
+
+
+def test_parar_cancela_a_espera_pendente(ctrl, monkeypatch):
+    ctrl._pending_manual = True
+    monkeypatch.setattr(Controller, "_run_once", lambda self: None)
+    ctrl.shared.update(user_wants_running=False)
+    t = threading.Thread(target=ctrl._run, daemon=True)
+    t.start()
+    assert _wait_for(lambda: ctrl._pending_manual is False)
+    ctrl.request_quit()
+    t.join(timeout=2)
+
+
+# -- fases pausam em vez de falhar quando o jogo some de vista ---------------------------------
+
+class _NoScreen:
+    def grab(self, *_a, **_k):
+        raise AssertionError("nao pode capturar a tela enquanto pausado")
+
+
+def test_wait_for_bite_pausado_acorda_e_para_se_mandarem_parar():
+    shared = SharedState()
+    shared.update(user_wants_running=True)
+    shared.set_pause("FiveM minimizado")
+    threading.Timer(0.2, lambda: shared.update(user_wants_running=False)).start()
+    assert fishing_logic.wait_for_bite(_NoScreen(), {"hook_zone": Region(0, 0, 10, 10)},
+                                       shared, True, 30.0) is False

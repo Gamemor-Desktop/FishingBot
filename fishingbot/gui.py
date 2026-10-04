@@ -182,16 +182,20 @@ class FishingBotApp:
         calib_lbl.config(text="Concluida" if snap["calibration_ok"] else "Pendente",
                           fg="#2f7d32" if snap["calibration_ok"] else "#888888")
 
+        message = snap["status_message"]
+        if snap["pause_reason"]:
+            # o ciclo esta congelado (FiveM minimizado/sem foco): volta sozinho
+            message = f"PAUSADO -- {snap['pause_reason']}. Volte pro jogo pra continuar."
         color = STATE_COLORS.get(snap["state"], "#333333")
         if snap["state"] == AppState.AGUARDANDO_CONFIRMACAO_MANUAL:
             # Destaque forte: essa e a unica etapa em que o bot esta parado
             # esperando uma acao manual do jogador (pegar/cortar o peixe e
             # apertar ENTER), entao precisa ser bem visivel na interface.
-            self.status_label.config(text=f"Status: {snap['status_message']}",
+            self.status_label.config(text=f"Status: {message}",
                                       fg=MANUAL_WAIT_FG, bg=MANUAL_WAIT_BG,
                                       font=("Segoe UI", 10, "bold"))
         else:
-            self.status_label.config(text=f"Status: {snap['status_message']}", fg=color,
+            self.status_label.config(text=f"Status: {message}", fg=color,
                                       bg=self._default_status_bg, font=("Segoe UI", 10))
 
         detail_bits = []

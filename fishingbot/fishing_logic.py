@@ -13,7 +13,7 @@ import time
 
 import mss
 
-from . import debug_tools, input_sim, vision, window_detect
+from . import debug_tools, input_sim, vision
 from .app_state import AppState, SharedState
 from .regions import DEFAULT_COLORS, Region
 from .stats import CastOutcome
@@ -38,6 +38,11 @@ def wait_for_bite(sct: mss.mss, regions: dict, shared: SharedState, dry_run: boo
     while time.monotonic() - start < timeout_seconds:
         if shared.should_stop_cycle():
             return False
+        paused = shared.checkpoint()  # jogo minimizado/sem foco: congela
+        if paused:
+            start += paused
+            confirm = 0
+            continue
         reading = _read_hook(sct, hz)
         debug_tools.log_ratio("hook_zone_bite", reading.bright_ratio, None,
                                extra=f"bolinha={'SIM' if reading.ball else 'nao'}")
@@ -63,6 +68,11 @@ def run_timing_minigame(sct: mss.mss, regions: dict, keybinds: dict, shared: Sha
     while time.monotonic() - start < timeout_seconds:
         if shared.should_stop_cycle():
             return False
+        paused = shared.checkpoint()
+        if paused:
+            start += paused
+            streak = 0
+            continue
         reading = _read_hook(sct, hz)
         debug_tools.log_ratio("hook_zone_hit", reading.bright_ratio, colors["hit_min_ratio"])
         streak = streak + 1 if reading.bright_ratio >= colors["hit_min_ratio"] else 0
@@ -85,20 +95,34 @@ def classify_pull_state(sct: mss.mss, regions: dict) -> str | None:
     red_mask = vision.hsv_mask_multi(frame, red["ranges"])
     gray_ratio = vision.pixel_ratio(gray_mask)
     red_ratio = vision.pixel_ratio(red_mask)
+    text_cfg = DEFAULT_COLORS["pulling_text"]
+    text_ratio, near_dark = vision.panel_text_features(frame, text_cfg)
     min_ratio = 0.3
     debug_tools.save_roi("pulling_state", frame)
     debug_tools.log_ratio("pulling_state", max(gray_ratio, red_ratio), min_ratio,
-                           extra=f"gray={gray_ratio:.4f} red={red_ratio:.4f}")
+                           extra=f"gray={gray_ratio:.4f} red={red_ratio:.4f} "
+                                 f"texto={text_ratio:.4f} fundo_escuro={near_dark:.2f}")
+    # Sem o texto branco do painel nao ha painel, por mais que a cor "bata"
+    # (ex: aviso 'Parar de pescar' sobre agua escura, madeira marrom).
+    if text_ratio < text_cfg["min_ratio"]:
+        return None
     if red_ratio > min_ratio and red_ratio > gray_ratio:
         return "red"
     if gray_ratio > min_ratio and gray_ratio > red_ratio:
+        return "gray"
+    # A caixa e translucida: sobre fundo marrom/claro a cor nao bate, mas o
+    # texto branco sobre fundo escuro, sem nada vermelho, e o "Calmo".
+    if (text_cfg["calm_min_ratio"] <= text_ratio <= text_cfg["calm_max_ratio"]
+            and near_dark >= text_cfg["calm_min_near_dark"]
+            and red_ratio < text_cfg["calm_max_red_ratio"]):
         return "gray"
     return None
 
 
 def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: SharedState,
                        dry_run: bool, timeout_seconds: float, end_confirm_seconds: float,
-                       first_appear_timeout_seconds: float = 3.0) -> CastOutcome:
+                       first_appear_timeout_seconds: float = 3.0,
+                       min_pull_seconds: float = 0.0) -> CastOutcome:
     """Fase de puxar. Duas situacoes SAO DIFERENTES e precisam de logica
     diferente:
 
@@ -146,6 +170,15 @@ def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: Share
         while time.monotonic() - start < timeout_seconds:
             if shared.should_stop_cycle():
                 return CastOutcome.STOPPED
+            paused = shared.checkpoint()
+            if paused:
+                # o controlador soltou as teclas ao pausar; ao voltar, o painel
+                # precisa ser relido do zero (nao conta como "sumiu")
+                start += paused
+                none_since = None
+                stable_count = 0
+                last_state = None
+                continue
 
             state = classify_pull_state(sct, regions)
             shared.update(fish_state_text={"gray": "Calmo", "red": "Puxando forte", None: "-"}[state])
@@ -181,7 +214,8 @@ def run_pulling_phase(sct: mss.mss, regions: dict, keybinds: dict, shared: Share
             else:
                 if none_since is None:
                     none_since = time.monotonic()
-                elif time.monotonic() - none_since >= end_confirm_seconds:
+                elif (time.monotonic() - none_since >= end_confirm_seconds
+                      and time.monotonic() - start >= min_pull_seconds):
                     log.info(f"Painel de pesca sumiu (ausente por {end_confirm_seconds:.2f}s "
                              f"seguidos) -> peixe capturado/perdido")
                     return CastOutcome.CAPTURED
@@ -210,13 +244,9 @@ def run_start_sequence(keybinds: dict, dry_run: bool, hwnd: int | None = None) -
     # nao estiver em foco nesse instante (usuario alt-tabou pro terminal do
     # bot, por exemplo), a tecla vai pra outro lugar e o jogo nunca recebe
     # nada, mesmo que o resto da automacao esteja funcionando certinho.
-    if hwnd is not None and not dry_run and not window_detect.is_foreground(hwnd):
-        if not window_detect.bring_to_foreground(hwnd):
-            log.warning(
-                "FiveM nao esta em primeiro plano e nao consegui trazer ele pra frente "
-                "automaticamente (o Windows as vezes bloqueia isso) -- a tecla NAO sera "
-                "enviada (guarda de foco); o bot vai parar."
-            )
+    # Nao puxamos o jogo pra frente aqui: se o usuario saiu do FiveM, o ciclo
+    # esta PAUSADO (shared.checkpoint) e nenhuma tecla chega; e se o foco sumir
+    # mesmo assim, a guarda de foco (input_sim) bloqueia a tecla.
     log.info(f"Pressionando '{keybinds['use_item_key']}' (iniciar pesca)")
     if not dry_run:
         input_sim.tap(keybinds["use_item_key"], hold_seconds=0.05)
@@ -236,6 +266,10 @@ def do_one_cast(sct: mss.mss, regions: dict, keybinds: dict, timings: dict,
     if shared.should_stop_cycle():
         return CastOutcome.STOPPED
 
+    shared.checkpoint()  # nao lanca a vara com o jogo minimizado/sem foco
+    if shared.should_stop_cycle():
+        return CastOutcome.STOPPED
+
     run_start_sequence(keybinds, dry_run, hwnd)
 
     shared.set_state(AppState.AGUARDANDO_MINIGAME, "Aguardando a linha afundar e o peixe beliscar...")
@@ -250,7 +284,8 @@ def do_one_cast(sct: mss.mss, regions: dict, keybinds: dict, timings: dict,
     outcome = run_pulling_phase(sct, regions, keybinds, shared, dry_run,
                                  timings["pulling_timeout_seconds"],
                                  timings.get("end_confirm_seconds", 1.2),
-                                 timings.get("pull_panel_first_appear_timeout_seconds", 6.0))
+                                 timings.get("pull_panel_first_appear_timeout_seconds", 6.0),
+                                 timings.get("pull_min_seconds", 8.0))
     if outcome is not CastOutcome.CAPTURED:
         return failed(outcome)
 
