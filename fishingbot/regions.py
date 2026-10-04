@@ -39,8 +39,13 @@ def _frac(x: float, y: float, w: float, h: float) -> dict:
 DEFAULT_FRACTIONS = {
     # bolinha vermelha + peixinho da fase de mordida
     "hook_zone": _frac(756, 528, 252, 108),
-    # linha "PEIXE" (Calmo / Puxando forte); recalibrada em 14/09/2026
+    # linha 3 do HUD (y=528): "PEIXE Calmo/Puxando forte", "X Parar de pescar" ou
+    # "E Parar nesta profundidade" -- o mesmo lugar muda de conteudo conforme a fase.
+    # Recalibrada em 14/09/2026.
     "pulling_state": _frac(24, 528, 270, 43),
+    # linha 2 do HUD (y=477): "PROFUNDIDADE  N m". Medida na gravacao de 04/10/2026
+    # (docs/calibracao.md); lida por depth_reader.py.
+    "depth_row": _frac(24, 477, 270, 43),
 }
 
 # Cores HSV sao independentes de resolucao -- nao precisam de fracao.

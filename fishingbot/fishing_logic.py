@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import logging
 import time
+from enum import Enum
 
 import mss
 
-from . import debug_tools, input_sim, vision
+from . import debug_tools, depth_reader, input_sim, vision
 from .app_state import AppState, SharedState
 from .regions import DEFAULT_COLORS, Region
 from .stats import CastOutcome
@@ -26,6 +27,136 @@ def _read_hook(sct: mss.MSS, roi: Region) -> vision.HookReading:
     reading = vision.read_hook(frame, DEFAULT_COLORS["hook_zone"])
     debug_tools.save_roi("hook_zone", frame, reading.mask)
     return reading
+
+
+class DepthLock(Enum):
+    """Como terminou a tentativa de travar a profundidade."""
+    LOCKED = "travou"             # E apertado e o prompt sumiu
+    BOTTOM = "fundo"              # a linha parou sozinha (fundo) antes de chegar ao alvo
+    BITE = "mordida"              # o peixe mordeu enquanto a linha afundava: segue pro timing
+    UNREADABLE = "ilegivel"       # o prompt apareceu mas nao consegui ler a profundidade
+    TIMEOUT = "tempo"             # o prompt nunca apareceu / nao chegou ao alvo a tempo
+    FAILED = "falhou"             # apertei E e o prompt continuou na tela
+    STOPPED = "interrompido"      # PARAR / panico / watchdog
+
+
+DEPTH_POLL_SECONDS = 0.03         # a profundidade sobe ~2 m/s: 30 ms e mais que suficiente
+DEPTH_CONFIRM_READS = 2           # leituras seguidas >= alvo antes de apertar E
+DEPTH_UNREADABLE_WARN_SECONDS = 3.0
+DEPTH_PRESS_VERIFY_SECONDS = 0.8  # quanto esperar o prompt sumir depois de apertar E
+DEPTH_MAX_PRESSES = 2
+
+DEPTH_PROBLEM_MESSAGES = {
+    DepthLock.UNREADABLE: "Nao consegui ler a profundidade no HUD -- a linha NAO foi travada.",
+    DepthLock.TIMEOUT: "A linha nao chegou a profundidade escolhida a tempo -- NAO foi travada.",
+    DepthLock.FAILED: "Apertei a tecla de parar a profundidade mas o jogo nao parou a linha.",
+}
+
+
+def _hud_row(sct: mss.MSS, regions: dict, name: str):
+    return vision.grab(sct, regions[name].as_roi())
+
+
+def run_depth_lock(sct: mss.MSS, regions: dict, keybinds: dict, shared: SharedState,
+                   dry_run: bool, target_m: int, max_wait_seconds: float) -> DepthLock:
+    """Afunda a linha ate `target_m` metros e aperta a tecla de 'Parar nesta
+    profundidade'. Regras de seguranca (a tecla E faz outras coisas no jogo):
+
+    - so aperta com o prompt '[E] Parar nesta profundidade' VISIVEL na tela
+      (depth_reader.depth_prompt_visible), em toda tentativa;
+    - so aperta com a profundidade LIDA com certeza (leitura duvidosa = nada),
+      em DEPTH_CONFIRM_READS leituras seguidas >= alvo e coerentes entre si
+      (saltos > 1 m reiniciam a confirmacao);
+    - se o prompt some sozinho (a linha chegou ao fundo) para sem apertar;
+    - a mordida tem prioridade: se o peixe morder enquanto afunda, sai."""
+    start = time.monotonic()
+    seen_prompt = False
+    ever_read = False
+    previous: int | None = None
+    streak = 0
+    bites = 0
+    unreadable_since: float | None = None
+    warned = False
+    shared.set_state(AppState.AGUARDANDO_MINIGAME, f"Afundando a linha ate {target_m} m...")
+
+    while time.monotonic() - start < max_wait_seconds:
+        if shared.should_stop_cycle():
+            return DepthLock.STOPPED
+        paused = shared.checkpoint()
+        if paused:
+            start += paused
+            previous, streak, bites = None, 0, 0
+            continue
+        now = time.monotonic()
+
+        bites = bites + 1 if _read_hook(sct, regions["hook_zone"]).ball else 0
+        if bites >= 2:
+            log.info("Peixe mordeu enquanto a linha afundava -> seguindo pro timing")
+            return DepthLock.BITE
+
+        if not depth_reader.depth_prompt_visible(_hud_row(sct, regions, "pulling_state")):
+            if seen_prompt:
+                log.info("A linha parou sozinha (fundo) antes de chegar ao alvo "
+                         f"de {target_m} m" + (f"; ultima leitura: {previous} m" if previous is not None else ""))
+                return DepthLock.BOTTOM
+            time.sleep(DEPTH_POLL_SECONDS)   # ainda arremessando: o prompt nao apareceu
+            continue
+        seen_prompt = True
+
+        row = _hud_row(sct, regions, "depth_row")
+        debug_tools.save_roi("depth_row", row)   # so com --debug: o recorte exato que foi lido
+        reading = depth_reader.read_depth(row)
+        debug_tools.log_ratio("depth", float(reading.value if reading.value is not None else -1), None,
+                              extra=f"leitura={reading.value} margem={reading.min_margin:.3f} {reading.reason}")
+        if reading.value is None:
+            previous, streak = None, 0
+            unreadable_since = unreadable_since if unreadable_since is not None else now
+            if not warned and now - unreadable_since >= DEPTH_UNREADABLE_WARN_SECONDS:
+                warned = True
+                log.warning(f"Profundidade ilegivel ha {DEPTH_UNREADABLE_WARN_SECONDS:.0f}s "
+                            f"({reading.reason}) -- nao vou apertar a tecla as cegas")
+                shared.set_state(AppState.AGUARDANDO_MINIGAME, DEPTH_PROBLEM_MESSAGES[DepthLock.UNREADABLE])
+            time.sleep(DEPTH_POLL_SECONDS)
+            continue
+
+        unreadable_since = None
+        ever_read = True
+        value = reading.value
+        if previous is not None and abs(value - previous) > 1:
+            streak = 0                      # salto estranho: leitura suspeita, recomeca
+        streak = streak + 1 if value >= target_m else 0
+        previous = value
+        if streak >= DEPTH_CONFIRM_READS:
+            return _press_stop_depth(sct, regions, keybinds, shared, dry_run, target_m, value)
+        time.sleep(DEPTH_POLL_SECONDS)
+
+    if seen_prompt and not ever_read:
+        return DepthLock.UNREADABLE
+    log.warning(f"Profundidade: {'prompt de parar nunca apareceu' if not seen_prompt else 'alvo nao atingido'} "
+                f"em {max_wait_seconds:.0f}s")
+    return DepthLock.TIMEOUT
+
+
+def _press_stop_depth(sct: mss.MSS, regions: dict, keybinds: dict, shared: SharedState,
+                      dry_run: bool, target_m: int, value: int) -> DepthLock:
+    key = keybinds["stop_depth_key"]
+    if dry_run:
+        log.info(f"Profundidade {value} m >= alvo {target_m} m -> apertaria '{key}' (dry-run, nenhuma tecla enviada)")
+        return DepthLock.LOCKED
+    for _attempt in range(DEPTH_MAX_PRESSES):
+        log.info(f"Profundidade {value} m (alvo {target_m} m) -> '{key}' (parar nesta profundidade)")
+        input_sim.tap(key, hold_seconds=0.05)
+        deadline = time.monotonic() + DEPTH_PRESS_VERIFY_SECONDS
+        while time.monotonic() < deadline:
+            if shared.should_stop_cycle():
+                return DepthLock.STOPPED
+            time.sleep(0.05)
+            if not depth_reader.depth_prompt_visible(_hud_row(sct, regions, "pulling_state")):
+                final = depth_reader.read_depth(_hud_row(sct, regions, "depth_row")).value
+                log.info(f"Linha travada: profundidade final lida = {final} m (alvo {target_m} m)")
+                return DepthLock.LOCKED
+    log.warning(f"Apertei '{key}' {DEPTH_MAX_PRESSES}x mas o prompt de parar continua na tela")
+    return DepthLock.FAILED
 
 
 NO_BITE_YET_MESSAGE = (
@@ -284,7 +415,8 @@ def run_start_sequence(keybinds: dict, dry_run: bool, hwnd: int | None = None) -
 
 
 def do_one_cast(sct: mss.MSS, regions: dict, keybinds: dict, timings: dict,
-                 shared: SharedState, dry_run: bool = False, hwnd: int | None = None) -> CastOutcome:
+                 shared: SharedState, dry_run: bool = False, hwnd: int | None = None,
+                 depth_target: int | None = None) -> CastOutcome:
     """Executa um ciclo completo de pesca (lancar -> esperar fisgada ->
     timing -> puxar) e devolve COMO terminou (CastOutcome): CAPTURED, ou o
     motivo da falha, ou STOPPED se foi interrompido (parar/panico/watchdog --
@@ -302,6 +434,16 @@ def do_one_cast(sct: mss.MSS, regions: dict, keybinds: dict, timings: dict,
         return CastOutcome.STOPPED
 
     run_start_sequence(keybinds, dry_run, hwnd)
+
+    if depth_target is not None:
+        lock = run_depth_lock(sct, regions, keybinds, shared, dry_run, depth_target,
+                              timings["depth_lock_max_wait_seconds"])
+        if shared.should_stop_cycle():
+            return CastOutcome.STOPPED
+        problem = DEPTH_PROBLEM_MESSAGES.get(lock)
+        if problem:
+            log.warning(f"Travar profundidade: {problem}")
+            shared.set_state(AppState.AGUARDANDO_MINIGAME, problem)
 
     shared.set_state(AppState.AGUARDANDO_MINIGAME, "Aguardando a linha afundar e o peixe beliscar...")
     if not wait_for_bite(sct, regions, shared, dry_run, timings["bite_timeout_seconds"],

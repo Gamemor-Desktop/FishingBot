@@ -66,6 +66,7 @@ DEFAULTS = {
         "pull_key": "s",
         "release_key": "w",
         "panic_key": "f10",   # parada de emergencia global (panic.py)
+        "stop_depth_key": "e",  # "Parar nesta profundidade" (travar a profundidade)
     },
     "timings": {
         "bite_timeout_seconds": 90,
@@ -76,6 +77,12 @@ DEFAULTS = {
         "after_confirm_delay_seconds": 1.5,                # folga depois do ENTER
         "pull_min_seconds": 8.0,                           # puxada nao termina antes disso
         "cast_confirm_seconds": 45.0,                      # sem mordida: avisa pra conferir a pesca
+        "depth_lock_max_wait_seconds": 60,                 # tempo maximo afundando ate a profundidade escolhida
+    },
+    "fishing": {
+        # profundidade (m) em que o bot aperta a tecla de parar a linha; null = desligado
+        # (comportamento de sempre: o bot nao mexe na profundidade)
+        "target_depth_m": None,
     },
     "safety": {
         "max_consecutive_failures": 5,
@@ -98,7 +105,8 @@ LEGACY_DEFAULTS: dict[tuple[str, str], set] = {
     ("timings", "cast_confirm_seconds"): {12.0},
 }
 
-# (tipo, minimo, maximo). Tipos: "num" (int/float finito), "int", "bool", "key".
+# (tipo, minimo, maximo). Tipos: "num" (int/float finito), "int", "optint" (int ou
+# null = desligado), "bool", "key".
 SCHEMA: dict[tuple[str, str], tuple] = {
     ("timings", "bite_timeout_seconds"): ("num", 5, 600),
     ("timings", "hit_timeout_seconds"): ("num", 1, 60),
@@ -108,6 +116,8 @@ SCHEMA: dict[tuple[str, str], tuple] = {
     ("timings", "after_confirm_delay_seconds"): ("num", 0, 30),
     ("timings", "pull_min_seconds"): ("num", 0, 60),
     ("timings", "cast_confirm_seconds"): ("num", 5, 600),
+    ("timings", "depth_lock_max_wait_seconds"): ("num", 5, 300),
+    ("fishing", "target_depth_m"): ("optint", 1, 500),
     ("safety", "max_consecutive_failures"): ("int", 1, 100),
     ("safety", "progress_timeout_minutes"): ("num", 1, 240),
     ("safety", "retry_backoff_base_seconds"): ("num", 0, 30),
@@ -120,6 +130,7 @@ SCHEMA: dict[tuple[str, str], tuple] = {
     ("keybinds", "pull_key"): ("key",),
     ("keybinds", "release_key"): ("key",),
     ("keybinds", "panic_key"): ("key",),
+    ("keybinds", "stop_depth_key"): ("key",),
     ("ui", "start_minimized"): ("bool",),
 }
 
@@ -137,6 +148,8 @@ def _valid(rule: tuple, v) -> bool:
         return isinstance(v, bool)
     if kind == "key":
         return isinstance(v, str) and 0 < len(v.strip()) <= 20
+    if kind == "optint":
+        return v is None or (isinstance(v, int) and not isinstance(v, bool) and rule[1] <= v <= rule[2])
     if kind == "int":
         return isinstance(v, int) and not isinstance(v, bool) and rule[1] <= v <= rule[2]
     return _is_number(v) and rule[1] <= v <= rule[2]
@@ -147,6 +160,8 @@ def _describe(rule: tuple) -> str:
         return "true/false"
     if rule[0] == "key":
         return "nome de tecla (texto)"
+    if rule[0] == "optint":
+        return f"inteiro entre {rule[1]} e {rule[2]}, ou null (desligado)"
     return f"{'inteiro' if rule[0] == 'int' else 'numero'} entre {rule[1]} e {rule[2]}"
 
 

@@ -88,6 +88,7 @@ fishingbot/
   regions.py                regioes do minigame como FRACOES da janela (nao pixels fixos)
   config_store.py           config.json (so overrides), migracao, validacao, padroes
   stats.py                  resultado de cada lance + estatisticas da sessao
+  depth_reader.py           leitura da PROFUNDIDADE e do prompt do E (modelos de digitos, sem OCR)
   capture_health.py         tela preta/congelada, regioes dentro da tela
   diagnostics.py            pacote de diagnostico quando o bot se desliga sozinho
   panic.py                  tecla de emergencia global (F10)
@@ -300,6 +301,32 @@ Campos:
 O programa nunca depende de nada especifico da maquina onde foi
 desenvolvido -- tudo isso e recalculado a partir da janela real do jogo em
 cada execucao.
+
+## Travar a linha numa profundidade
+
+Na janela do bot, marque **"Travar a linha em [N] m"**. Depois de lancar, o bot
+acompanha a **PROFUNDIDADE** do HUD enquanto a linha afunda (sobe ~2 m/s) e
+aperta a tecla **E** ("Parar nesta profundidade") quando ela chega em N. Vale a
+partir do proximo lance e fica salvo (`fishing.target_depth_m` no config; vazio/
+desligado = o bot nao mexe na profundidade, como antes).
+
+Seguranca (E faz outras coisas no jogo, entao o bot e conservador):
+
+- so aperta E com o prompt **"[E] Parar nesta profundidade"** visivel na tela;
+- so aperta com a profundidade **lida com certeza**, em 2 leituras seguidas no
+  alvo; leitura duvidosa, pico isolado ou HUD ilegivel = **nao aperta** (e avisa
+  "a linha NAO foi travada");
+- se a linha chegar ao fundo antes do alvo (`4 m (fundo)`), nao aperta nada;
+- se o peixe morder enquanto afunda, a mordida tem prioridade.
+
+Como conferir **sem risco** antes de confiar: rode `FishingBot.exe --dry-run
+--debug`, clique INICIAR, e **lance a vara voce mesmo**. O bot nao envia tecla,
+mas o log mostra as leituras (`depth: leitura=...`) e a decisao
+(`Profundidade 5 m >= alvo 5 m -> apertaria 'e'`).
+
+Limites: leitura validada em **1920x1080 ou maior** (em janela menor o bot avisa
+e, se nao conseguir ler, nao trava). Detalhes e evidencias:
+[docs/calibracao.md](docs/calibracao.md).
 
 ## Arquivos e limpeza automatica (`%LOCALAPPDATA%\FishingBot\`)
 

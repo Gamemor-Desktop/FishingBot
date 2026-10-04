@@ -311,6 +311,23 @@ class Controller:
         self.shared.update(quit_requested=True, user_wants_running=False)
         self._stop_event.set()
 
+    def set_target_depth(self, meters: int | None) -> bool:
+        """Define (ou desliga, com None) a profundidade em que o bot trava a
+        linha. Vale a partir do proximo lance e fica salvo no config. Retorna
+        False se o valor for invalido (nada muda)."""
+        rule = config_store.SCHEMA[("fishing", "target_depth_m")]
+        if not config_store._valid(rule, meters):
+            return False
+        if self.cfg["fishing"]["target_depth_m"] == meters:
+            return True  # nada mudou: nao regrava o arquivo
+        self.cfg["fishing"]["target_depth_m"] = meters
+        try:
+            config_store.save_config(self.cfg)
+        except OSError as exc:
+            log.warning(f"Config: nao consegui salvar a profundidade ({exc}); vale so nesta execucao")
+        log.info("Travar profundidade: " + (f"{meters} m" if meters is not None else "desligado"))
+        return True
+
     def panic(self) -> None:
         """Parada de emergencia (tecla de panico): para o bot e solta tudo.
         Pode ser chamada de qualquer thread, em qualquer estado."""
@@ -565,6 +582,12 @@ class Controller:
                 return
             input_sim.set_focus_guard(lambda: is_foreground(window.hwnd))
 
+        if config_store.value(self.cfg, "fishing", "target_depth_m") is not None and window.width < 1800:
+            msg = (f"Travar profundidade: so foi validado em 1920x1080 ou maior (janela {window.width}x"
+                   f"{window.height}); pode nao conseguir ler a profundidade.")
+            log.warning(msg)
+            shared.update(config_notice=msg)
+
         watchdog = _WindowWatchdog(
             shared, window, require_focus=not self.dry_run,
             pause_timeout=config_store.value(self.cfg, "safety", "pause_timeout_seconds"))
@@ -588,8 +611,9 @@ class Controller:
 
                 shared.set_state(AppState.AGUARDANDO_MINIGAME)
                 try:
-                    outcome = fishing_logic.do_one_cast(sct, regions, keybinds, timings, shared,
-                                                          self.dry_run, hwnd=window.hwnd)
+                    outcome = fishing_logic.do_one_cast(
+                        sct, regions, keybinds, timings, shared, self.dry_run, hwnd=window.hwnd,
+                        depth_target=config_store.value(self.cfg, "fishing", "target_depth_m"))
                 except ScreenShotError as exc:
                     log.error(f"Falha na captura de tela: {exc}")
                     outcome = CastOutcome.CAPTURE_ERROR

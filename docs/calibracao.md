@@ -141,6 +141,56 @@ toda pescaria normal.
 - `pause_timeout_seconds` (120): FiveM minimizado/sem foco pausa o ciclo; passando
   disso o bot para.
 
+## Profundidade (travar a linha)
+
+**04/10/2026**, a partir de uma gravacao do HUD feita pelo usuario
+(`tools/capture_hud.py`; a gravacao bruta foi perdida, as 53 fixtures
+rotuladas que sairam dela estao em `tests/fixtures/{depth,prompt,linha}`).
+
+**Como e no jogo.** Depois do lance o HUD passa por ARREMESSANDO (profundidade
+`-`), AFUNDANDO (a profundidade sobe sozinha **~2 m/s**: 0 m em 22,15 s, 2 m em
+22,65 s, 3 m, 4 m...; aparece o prompt **"[E] Parar nesta profundidade"**),
+ESPERANDO (`4 m (fundo)` quando chega ao fundo; o prompt do E some, aparece
+"[X] Parar de pescar") e FISGADO (linha "PEIXE" + W/S/X). Apertar **E** durante o
+AFUNDANDO trava a linha na profundidade atual.
+
+**Geometria (1920x1080, caixas de 270x43 px em x=24).** O HUD e uma coluna de
+caixas que troca de conteudo conforme a fase:
+
+| linha | y | AFUNDANDO / ESPERANDO | FISGADO |
+|---|---|---|---|
+| 1 | ~424 | LINHA `18,5 /181 m` | LINHA |
+| 2 | **477** | **PROFUNDIDADE `3 m`** (regiao `depth_row`) | PROFUNDIDADE |
+| 3 | 528 | `[E] Parar nesta profundidade` / `[X] Parar de pescar` | PEIXE `Calmo` |
+
+A linha 3 e a regiao `pulling_state`: o mesmo lugar muda de conteudo.
+**Erro corrigido:** a primeira gravacao usou a regiao `pulling_state` achando que
+era a da profundidade; so o quadro maior do HUD mostrou que a PROFUNDIDADE e a
+linha 2.
+
+**Leitura (sem OCR externo).** Fonte monoespacada de tamanho fixo: digitos
+~9x14 px, passo de 11,5-13,5 px entre centros, `m` ~10x10 a ~22,5 px do ultimo
+digito. Cada digito e comparado com um modelo 12x18 (distancia media <= 0,20 e
+margem >= 0,03 sobre o 2o). Os modelos vem do numero grande do **LINHA** (mesma
+fonte, ~7% maior, traz 0-9) + da caixa PROFUNDIDADE. Teste fora da amostra:
+modelos feitos so com o LINHA leem **14/14** caixas PROFUNDIDADE que nunca viram
+(margem minima 0,043).
+
+**Prompt do E.** Texto identico em todo o jogo, comparado por pixels brancos
+contra um modelo: positivos 1,00/1,00 (recall/precisao), melhor negativo
+(painel "Puxando forte") 0,54; limiar 0,85.
+
+**Limites conhecidos (nao validados):**
+
+- So existem leituras reais de **0 a 6 m** (fundo raso); 7, 8 e 9 vem so do
+  LINHA e os numeros de **2-3 digitos** foram testados so com imagens
+  sintetizadas (digitos reais colados). Falta uma gravacao em agua funda.
+- Resolucao: validado em **1920x1080 e maiores** (1,33x e 2x: 14/14). Abaixo
+  disso a leitura piora (0,85x: 12/14; 0,667x: 0/14) -- mas **nunca devolve um
+  numero errado**, so "nao li", e o bot nao aperta E.
+- Nao se sabe se bites acontecem durante o AFUNDANDO; por seguranca a mordida tem
+  prioridade sobre a trava.
+
 ## Comportamentos do jogo observados
 
 - O FiveM **se minimiza sozinho ao perder o foco** (basta clicar no bot) e, ao

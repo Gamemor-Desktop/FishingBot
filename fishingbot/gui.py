@@ -46,7 +46,7 @@ class FishingBotApp:
         self._last_state: AppState | None = None
 
         root.title("FishingBot")
-        root.geometry("340x520")
+        root.geometry("340x590")
         root.resizable(False, False)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         # excecao dentro de um callback do Tk: loga o traceback (por padrao
@@ -101,6 +101,25 @@ class FishingBotApp:
                                      wraplength=310, justify="left")
         self.stats_label.pack(fill="x", padx=10)
 
+        # -- travar a profundidade (a tecla E "Parar nesta profundidade" do jogo) --
+        depth_box = tk.LabelFrame(self.root, text=" Profundidade ", font=("Segoe UI", 9))
+        depth_box.pack(fill="x", padx=10, pady=(8, 0))
+        current = self.controller.cfg["fishing"]["target_depth_m"]
+        self.depth_enabled = tk.BooleanVar(value=current is not None)
+        self.depth_text = tk.StringVar(value=str(current if current is not None else 10))
+        tk.Checkbutton(depth_box, text="Travar a linha em", variable=self.depth_enabled,
+                       command=self._on_depth_change, font=("Segoe UI", 9)).pack(side="left", padx=(6, 0))
+        self.depth_spin = tk.Spinbox(depth_box, from_=1, to=500, width=5, textvariable=self.depth_text,
+                                      command=self._on_depth_change, font=("Segoe UI", 10))
+        self.depth_spin.pack(side="left", padx=(4, 2), pady=4)
+        for event in ("<KeyRelease>", "<FocusOut>", "<Return>"):
+            self.depth_spin.bind(event, lambda _e: self._on_depth_change())
+        tk.Label(depth_box, text="m", font=("Segoe UI", 9)).pack(side="left")
+        self.depth_hint = tk.Label(self.root, text="", font=("Segoe UI", 8), fg="#555555",
+                                    wraplength=310, justify="left")
+        self.depth_hint.pack(fill="x", padx=12)
+        self._on_depth_change()
+
         btn_frame = tk.Frame(self.root)
         btn_frame.pack(pady=16)
 
@@ -134,6 +153,25 @@ class FishingBotApp:
         self._set_buttons_state(running=False)
 
     # -- acoes dos botoes -----------------------------------------------
+
+    def _on_depth_change(self) -> None:
+        """Aplica o campo de profundidade (vale no proximo lance e fica salvo)."""
+        if not self.depth_enabled.get():
+            self.controller.set_target_depth(None)
+            self.depth_hint.config(text="Desligado: o bot nao mexe na profundidade da linha.", fg="#555555")
+            return
+        try:
+            meters = int(self.depth_text.get().strip())
+        except ValueError:
+            meters = None
+        if meters is None or not self.controller.set_target_depth(meters):
+            self.depth_hint.config(text="Digite um numero inteiro de 1 a 500 (metros). "
+                                        "Enquanto estiver invalido, o bot NAO trava a linha.", fg="#c62828")
+            self.controller.set_target_depth(None)
+            return
+        key = self.controller.cfg["keybinds"]["stop_depth_key"].upper()
+        self.depth_hint.config(text=f"Ao chegar a {meters} m o bot aperta {key} (Parar nesta profundidade). "
+                                    f"Se a linha chegar ao fundo antes, nao aperta nada.", fg="#555555")
 
     def _on_start(self) -> None:
         self.shared.update(user_wants_running=True, error_message="")

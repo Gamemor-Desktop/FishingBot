@@ -1,14 +1,15 @@
 """
-Grava o HUD de pesca do FiveM pra eu (e os testes) poderem ver como a
-PROFUNDIDADE aparece. NAO envia nenhuma tecla: voce joga normalmente.
+Grava as 3 linhas do HUD de pesca do FiveM (LINHA, PROFUNDIDADE e o prompt
+"Parar nesta profundidade") pra conferir a leitura da profundidade e gerar
+fixtures de teste. NAO envia nenhuma tecla: voce joga normalmente.
 
 Uso (no prompt de comando, na pasta do projeto):
 
     venv\\Scripts\\python tools\\capture_hud.py
 
 1. Rode o comando. Ele espera o FiveM ficar em primeiro plano (ate 60 s).
-2. Volte pro jogo, lance a vara e deixe a linha afundar ate ~25 m
-   (ou mais), aperte E ("Parar nesta profundidade") e, se quiser, espere a
+2. Volte pro jogo, lance a vara e deixe a linha afundar o MAXIMO que o local
+   permitir (de preferencia ate 10 m ou mais), aperte E ("Parar nesta profundidade") e, se quiser, espere a
    mordida e a puxada. A gravacao dura 90 s.
 3. Os arquivos ficam em %LOCALAPPDATA%\\FishingBot\\hud_capture\\<data_hora>\\
 
@@ -20,6 +21,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -28,12 +30,15 @@ import mss  # noqa: E402
 import numpy as np  # noqa: E402
 
 from fishingbot import config_store  # noqa: E402
-from fishingbot.regions import REFERENCE_HEIGHT, REFERENCE_WIDTH, compute_all_regions  # noqa: E402
+from fishingbot.regions import REFERENCE_HEIGHT, REFERENCE_WIDTH  # noqa: E402
 from fishingbot.window_detect import find_fivem_window, is_foreground, setup_dpi_awareness  # noqa: E402
 
-ROI_INTERVAL = 0.1     # 10 quadros/s da caixa do painel (270x43 px: pequenos)
+ROI_INTERVAL = 0.1     # 10 quadros/s
 CONTEXT_EVERY = 5      # a cada 5 quadros, tambem a coluna inteira do HUD (mostra o layout)
-# coluna do HUD na resolucao de referencia (x, y, largura, altura)
+# as 3 linhas do HUD (LINHA, PROFUNDIDADE, prompt) na resolucao de referencia: x, y, largura, altura.
+# (x=24..294, y=420..575 cobre as tres caixas com folga)
+ROI_REF = (20, 420, 280, 155)
+# coluna do HUD inteira (inclui o titulo AFUNDANDO/ESPERANDO...)
 CONTEXT_REF = (0, 380, 480, 340)
 
 
@@ -61,9 +66,10 @@ def main() -> int:
         print("Nao achei o FiveM em primeiro plano em 60 s. Abra o jogo e rode de novo.")
         return 1
 
-    regions = compute_all_regions(window.left, window.top, window.width, window.height)
-    roi = regions["pulling_state"]          # a caixa onde aparece PEIXE / PROFUNDIDADE
     sx, sy = window.width / REFERENCE_WIDTH, window.height / REFERENCE_HEIGHT
+    rx, ry, rw, rh = ROI_REF
+    roi = SimpleNamespace(x=window.left + round(rx * sx), y=window.top + round(ry * sy),
+                          w=round(rw * sx), h=round(rh * sy))   # as 3 linhas do HUD
     cx, cy, cw, ch = CONTEXT_REF
     ctx = (window.left + round(cx * sx), window.top + round(cy * sy), round(cw * sx), round(ch * sy))
 
@@ -71,7 +77,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     (out / "info.txt").write_text(
         f"janela {window.width}x{window.height} em ({window.left},{window.top})\n"
-        f"roi (caixa PEIXE/PROFUNDIDADE): x={roi.x} y={roi.y} w={roi.w} h={roi.h}\n"
+        f"roi (3 linhas do HUD): x={roi.x} y={roi.y} w={roi.w} h={roi.h}\n"
         f"contexto (coluna do HUD): x={ctx[0]} y={ctx[1]} w={ctx[2]} h={ctx[3]}\n", encoding="utf-8")
 
     print(f"\nGRAVANDO por {args.seconds:.0f} s em {out}")
