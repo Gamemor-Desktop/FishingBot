@@ -129,8 +129,8 @@ DEFAULT_COLORS = {
             ([0, 30, 70], [15, 200, 255]),
         ],
     },
-    # Aviso "X Parar de pescar": aparece enquanto a linha esta na agua, ou seja,
-    # e o sinal de que a pesca COMECOU depois do lance. Texto vermelho vivo +
+    # Aviso "X Parar de pescar" (aparece junto da mordida: ~1s antes da bolinha,
+    # ~16s depois do lance num teste real -- NAO logo apos lancar). Texto vermelho vivo +
     # o "X" branco da tecla, a esquerda. Medido em 18 capturas rotuladas
     # (4 com o aviso, em 4 fundos diferentes): vermelho 0.030-0.039 e branco do
     # X 0.0063 em todas; o painel "Puxando forte" tem vermelho (0.045) mas sem

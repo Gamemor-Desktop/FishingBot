@@ -91,10 +91,11 @@ DEFAULTS = {
         # terminava 0-5s depois do ESPACO (puxadas de verdade duram 30-200s):
         # eram leituras erradas do painel, com o peixe ainda na linha.
         "pull_min_seconds": 8.0,
-        # se o aviso "X Parar de pescar" nao aparecer em tantos segundos depois
-        # de apertar a tecla da vara, o bot AVISA na tela que a pesca parece
-        # nao ter comecado (nao abre mao do lance: so informa)
-        "cast_confirm_seconds": 12.0,
+        # sem mordida (nem o aviso "X Parar de pescar", que so aparece junto da
+        # mordida) depois de tantos segundos, o bot AVISA na tela pra voce
+        # conferir se a pesca comecou (so informa: nao cancela o lance). Em
+        # teste real a mordida levou ~16s; um prazo curto daria alarme falso.
+        "cast_confirm_seconds": 45.0,
     },
     # Anti-falha (ver controller.py / capture_health.py)
     "safety": {

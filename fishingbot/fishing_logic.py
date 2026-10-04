@@ -28,20 +28,22 @@ def _read_hook(sct: mss.mss, roi: Region) -> vision.HookReading:
     return reading
 
 
-NOT_FISHING_MESSAGE = (
-    "A pesca parece NAO ter comecado: o aviso 'Parar de pescar' nao apareceu. "
-    "A vara esta equipada na tecla da vara e voce esta num local de pesca?"
+NO_BITE_YET_MESSAGE = (
+    "Ainda sem mordida. Se a pesca nem comecou (vara nao equipada, menu ou "
+    "inventario aberto, longe do local de pesca), pare o bot e posicione o personagem."
 )
 
 
 def wait_for_bite(sct: mss.mss, regions: dict, shared: SharedState, dry_run: bool,
-                   timeout_seconds: float, cast_check_seconds: float = 12.0) -> bool:
+                   timeout_seconds: float, cast_check_seconds: float = 45.0) -> bool:
     """Espera a bolinha da mordida aparecer (forma de disco brilhante, ver
     vision.read_hook), em 2 frames seguidos.
 
-    Enquanto espera, confere se o aviso 'Parar de pescar' (linha na agua)
-    apareceu; se nao aparecer em `cast_check_seconds`, avisa na interface que a
-    pesca parece nao ter comecado (so informa, nao cancela o lance)."""
+    Se passar `cast_check_seconds` sem o aviso 'Parar de pescar' nem mordida,
+    avisa na interface (so informa, nao cancela o lance). ATENCAO: no jogo esse
+    aviso aparece junto da mordida (~1s antes da bolinha, ~16s depois do lance
+    num teste real), NAO logo depois de lancar -- por isso o prazo e longo: um
+    prazo curto dispararia em toda pescaria normal."""
     hz = regions["hook_zone"]
     start = time.monotonic()
     confirm = 0
@@ -69,8 +71,8 @@ def wait_for_bite(sct: mss.mss, regions: dict, shared: SharedState, dry_run: boo
                                       "Aguardando a linha afundar e o peixe beliscar...")
         if not prompt_seen and not warned and now - start >= cast_check_seconds:
             warned = True
-            log.warning(NOT_FISHING_MESSAGE)
-            shared.set_state(AppState.AGUARDANDO_MINIGAME, NOT_FISHING_MESSAGE)
+            log.warning(NO_BITE_YET_MESSAGE)
+            shared.set_state(AppState.AGUARDANDO_MINIGAME, NO_BITE_YET_MESSAGE)
         reading = _read_hook(sct, hz)
         debug_tools.log_ratio("hook_zone_bite", reading.bright_ratio, None,
                                extra=f"bolinha={'SIM' if reading.ball else 'nao'} "
@@ -303,7 +305,7 @@ def do_one_cast(sct: mss.mss, regions: dict, keybinds: dict, timings: dict,
 
     shared.set_state(AppState.AGUARDANDO_MINIGAME, "Aguardando a linha afundar e o peixe beliscar...")
     if not wait_for_bite(sct, regions, shared, dry_run, timings["bite_timeout_seconds"],
-                         timings.get("cast_confirm_seconds", 12.0)):
+                         timings.get("cast_confirm_seconds", 45.0)):
         return failed(CastOutcome.NO_BITE)
 
     shared.set_state(AppState.AUTOMACAO, "Peixe beliscou! Esperando o momento certo pra fisgar...")

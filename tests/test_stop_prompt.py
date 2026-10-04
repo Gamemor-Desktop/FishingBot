@@ -35,11 +35,11 @@ def _shared() -> SharedState:
     return s
 
 
-def test_sem_o_aviso_o_bot_avisa_que_a_pesca_nao_comecou(make_sct):
+def test_sem_mordida_nem_aviso_o_bot_avisa_pra_conferir_a_pesca(make_sct):
     shared = _shared()
     sct = make_sct("hook_zone", "010809")          # cena vazia: sem bolinha, sem aviso
     fishing_logic.wait_for_bite(sct, REGIONS, shared, True, 0.6, cast_check_seconds=0.2)
-    assert "NAO ter comecado" in shared.snapshot()["status_message"]
+    assert "Ainda sem mordida" in shared.snapshot()["status_message"]
 
 
 def test_com_o_aviso_nao_ha_alerta(make_sct, monkeypatch):
@@ -47,7 +47,7 @@ def test_com_o_aviso_nao_ha_alerta(make_sct, monkeypatch):
     monkeypatch.setattr(fishing_logic.vision, "stop_prompt_visible", lambda *_: True)
     sct = make_sct("hook_zone", "010809")
     fishing_logic.wait_for_bite(sct, REGIONS, shared, True, 0.6, cast_check_seconds=0.2)
-    assert "NAO ter comecado" not in shared.snapshot()["status_message"]
+    assert "Ainda sem mordida" not in shared.snapshot()["status_message"]
 
 
 def test_o_alerta_nao_cancela_o_lance_e_a_mordida_ainda_vale(make_sct):
@@ -63,4 +63,4 @@ def test_alerta_some_quando_o_aviso_aparece(make_sct, monkeypatch):
     monkeypatch.setattr(fishing_logic.vision, "stop_prompt_visible", lambda *_: next(seen, True))
     sct = make_sct("hook_zone", "010809")
     fishing_logic.wait_for_bite(sct, REGIONS, shared, True, 1.5, cast_check_seconds=0.0)
-    assert "NAO ter comecado" not in shared.snapshot()["status_message"]
+    assert "Ainda sem mordida" not in shared.snapshot()["status_message"]

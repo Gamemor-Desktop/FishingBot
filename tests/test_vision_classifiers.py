@@ -37,6 +37,13 @@ PULL_CASES = [
     ("013000", None, "agua/cinza, sem painel"),
     ("013035", None, "cerca branca, sem painel"),
     ("013004", None, "madeira com cerca, sem painel"),
+    # Pescaria real de 04/10/2026 (puxada de 1m49s, 108 frames: 0 perdas no meio)
+    ("001731", "red", "Puxando forte (pescaria real)"),
+    ("001845", "red", "Puxando forte (pescaria real)"),
+    ("001735", "gray", "Calmo (pescaria real)"),
+    ("001800", "gray", "Calmo (pescaria real)"),
+    ("001900", "gray", "Calmo (pescaria real)"),
+    ("001917", None, "fim da puxada: painel sumiu (pescaria real)"),
     # Corrigidos em 03/10/2026 pelo texto branco do painel (pulling_text):
     ("012458", "gray", "Calmo translucido sobre fundo marrom (antes: nao detectado)"),
     ("013108", "gray", "Calmo translucido sobre fundo claro (antes: nao detectado)"),
